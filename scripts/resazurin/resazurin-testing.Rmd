@@ -16,6 +16,11 @@ editor_options:
 
 This script analyzes tests and trials of resazurin assays for the PolyIC seed project. 
 
+From this testing we need to try a few things: 
+
+1. Run the assays for a longer period of time (6 h) 
+2. Run the assay at a lower temperature to maintain >50% mortality by the end of the 4 hour period at least with less at the 24 hour time point 
+
 # Set up 
 
 Set up workspace, set options, and load required packages.    
