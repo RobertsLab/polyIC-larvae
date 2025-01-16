@@ -510,6 +510,14 @@ rand(model)
 qqPlot(residuals(model))
 ```
 
+Post hoc tests
+```{r}
+emm<-emmeans(model, ~spat_treatment|temperature|timepoint)
+pairs(emm)
+```
+
+At high temperature, control and treated spat are different at 3, 4, and 5 hours. At control temperature, rates were higher in treated spat at hour 5. 
+
 Plot with individual points with geom smooth lines. 
 
 ```{r}
