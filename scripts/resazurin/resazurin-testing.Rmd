@@ -3,13 +3,13 @@ title: PolyIC resazurin testing
 author: "AS Huffmyer"
 date: '2024'
 output:
+  github_document: null
+  md_document: default
   html_document:
     code_folding: hide
     toc: true
     toc_depth: 6
     toc_float: true
-  md_document: default
-  github_document: null
 editor_options: 
   chunk_output_type: console
 ---
