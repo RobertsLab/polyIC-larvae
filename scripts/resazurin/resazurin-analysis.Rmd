@@ -252,10 +252,10 @@ rand(model)
 qqPlot(residuals(model))
 ```
 
-Residuals are violating normality. Attempt with square root transformation. 
+Residuals are violating normality. Attempt with cube root transformation. 
 
 ```{r}
-model<-lmer(sqrt(1+value) ~ timepoint * temperature * spat_treatment + (1|plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
+model<-lmer((1+value)^(1/3) ~ timepoint * temperature * spat_treatment + (1|plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
 
 summary(model)
 anova(model)
@@ -263,6 +263,15 @@ rand(model)
 
 qqPlot(residuals(model))
 ```
+
+Plot model effects. 
+
+```{r}
+plot(Effect(c("spat_treatment", "temperature"), model, residuals=TRUE))
+plot(Effect(c("timepoint"), model, residuals=TRUE))
+plot(Effect(c("timepoint", "temperature"), model, residuals=TRUE))
+```
+
 
 ## Plotting 
 
@@ -282,14 +291,24 @@ plot1<-full_data%>%
 
 plot1a<-full_data%>%
 
-  ggplot(aes(x=timepoint, y=value, color=tank, fill=tank))+
-  facet_grid(~temperature)+
+  ggplot(aes(x=timepoint, y=value, color=temperature, fill=temperature))+
   geom_point(alpha=0.5)+
-  geom_smooth(aes(group=tank))+
+  geom_smooth(aes(group=temperature), method="lm")+
+  scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
+  scale_fill_manual(values=c("16C"="cyan4", "40C"="orange"))+
   theme_classic()+
   xlab("Hour");plot1a
 
 plot1b<-full_data%>%
+
+  ggplot(aes(x=timepoint, y=value, color=tank, fill=tank))+
+  facet_grid(~temperature)+
+  geom_point(alpha=0.5)+
+  geom_smooth(aes(group=tank), method="lm")+
+  theme_classic()+
+  xlab("Hour");plot1b
+
+plot1c<-full_data%>%
 
   ggplot(aes(x=timepoint, y=value, color=spat_treatment, fill=spat_treatment))+
   facet_grid(~temperature)+
@@ -298,5 +317,5 @@ plot1b<-full_data%>%
   scale_colour_manual(values=c("control"="darkgray", "treated"="darkred"))+
   scale_fill_manual(values=c("control"="darkgray", "treated"="darkred"))+
   theme_classic()+
-  xlab("Hour");plot1b
+  xlab("Hour");plot1c
 ```
