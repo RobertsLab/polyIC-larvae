@@ -14,6 +14,9 @@ editor_options:
   chunk_output_type: console
 ---
 
+
+To do: Add size normalization, Add survival 
+
 This script analyzes resazurin assays for the PolyIC seed project. 
 
 # Set up 
@@ -293,7 +296,7 @@ plot1a<-full_data%>%
 
   ggplot(aes(x=timepoint, y=value, color=temperature, fill=temperature))+
   geom_point(alpha=0.5)+
-  geom_smooth(aes(group=temperature), method="lm")+
+  geom_smooth(aes(group=temperature))+
   scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
   scale_fill_manual(values=c("16C"="cyan4", "40C"="orange"))+
   theme_classic()+
@@ -304,7 +307,7 @@ plot1b<-full_data%>%
   ggplot(aes(x=timepoint, y=value, color=tank, fill=tank))+
   facet_grid(~temperature)+
   geom_point(alpha=0.5)+
-  geom_smooth(aes(group=tank), method="lm")+
+  geom_smooth(aes(group=tank))+
   theme_classic()+
   xlab("Hour");plot1b
 
