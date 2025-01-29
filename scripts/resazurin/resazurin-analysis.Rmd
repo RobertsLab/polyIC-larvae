@@ -385,7 +385,7 @@ plot2<-ggplot(full_data, aes(x = temperature, y = predicted_mortality, color = s
   ) +
   theme_classic();plot2
 
-ggsave(plot2, filename="figures/resazurin/mortality1.png", width=6, height=5)
+ggsave(plot2, filename="figures/resazurin/mortality_treatment.png", width=6, height=5)
 
 # Plot
 plot2a<-ggplot(full_data, aes(x = spat_treatment, y = predicted_mortality, color = temperature, fill = temperature, group=temperature)) +
@@ -399,7 +399,7 @@ plot2a<-ggplot(full_data, aes(x = spat_treatment, y = predicted_mortality, color
   ) +
   theme_classic();plot2a
 
-ggsave(plot2a, filename="figures/resazurin/mortality2.png", width=6, height=5)
+ggsave(plot2a, filename="figures/resazurin/mortality_temperature.png", width=6, height=5)
 ```
 
 
