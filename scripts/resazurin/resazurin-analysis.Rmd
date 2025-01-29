@@ -402,6 +402,19 @@ plot2a<-ggplot(full_data, aes(x = spat_treatment, y = predicted_mortality, color
 ggsave(plot2a, filename="figures/resazurin/mortality_temperature.png", width=6, height=5)
 ```
 
+Plot individual tanks. 
+
+```{r}
+# Plot
+plot3<-ggplot(full_data, aes(x = temperature, y = predicted_mortality, color = tank, fill = tank, group=tank)) +
+  geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
+  labs(
+    title = "",
+    y = "Probability of Mortality",
+  ) +
+  theme_classic();plot3
+```
 
 
 
