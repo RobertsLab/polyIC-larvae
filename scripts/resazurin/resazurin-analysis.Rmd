@@ -40,6 +40,8 @@ library(effects)
 library(emmeans)
 ```
 
+# Resazurin metabolic rates (individual) 
+
 ## Load data 
 
 ```{r}
@@ -302,6 +304,8 @@ plot1a<-full_data%>%
   theme_classic()+
   xlab("Hour");plot1a
 
+ggsave(plot1a, filename="figures/resazurin/metabolism_temperature.png", width=7, height=5)
+
 plot1b<-full_data%>%
 
   ggplot(aes(x=timepoint, y=value, color=tank, fill=tank))+
@@ -310,6 +314,7 @@ plot1b<-full_data%>%
   geom_smooth(aes(group=tank))+
   theme_classic()+
   xlab("Hour");plot1b
+
 
 plot1c<-full_data%>%
 
@@ -321,4 +326,82 @@ plot1c<-full_data%>%
   scale_fill_manual(values=c("control"="darkgray", "treated"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1c
+
+ggsave(plot1c, filename="figures/resazurin/metabolism_treatment.png", width=7, height=5)
 ```
+
+
+# Survival 
+
+## Load data 
+
+```{r}
+surv<-read_csv("data/resazurin/survival.csv")%>%mutate(date=as.character(date))%>%select(!notes)
+```
+
+Merge with existing data. 
+
+```{r}
+full_data<-left_join(full_data, surv)
+```
+
+## Analyze survival 
+
+Analyze with binomial logistic regression for effects of temperature and spat treatment with tank as random effect. 
+
+0 = alive
+1 = mortality 
+
+```{r}
+surv_model<-glmer(mortality ~ temperature * spat_treatment + (1|holding_tank) + (1|spat_treatment:tank), family = binomial(link = "logit"), data=full_data)
+
+summary(surv_model)
+Anova(surv_model)
+```
+
+Plot model effects. 
+
+```{r}
+plot(Effect(c("spat_treatment", "temperature"), surv_model, residuals=TRUE))
+plot(Effect(c("temperature"), surv_model, residuals=TRUE))
+plot(Effect(c("spat_treatment"), surv_model, residuals=TRUE))
+```
+
+Generate predictive mortality. 
+
+```{r}
+# Generate predicted probabilities
+full_data$predicted_mortality <- predict(surv_model, type = "response")
+
+# Plot
+plot2<-ggplot(full_data, aes(x = temperature, y = predicted_mortality, color = spat_treatment, fill = spat_treatment, group=spat_treatment)) +
+  geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
+  scale_colour_manual(values=c("darkgray", "darkred"))+
+  scale_fill_manual(values=c("darkgray", "darkred"))+
+  labs(
+    title = "",
+    y = "Probability of Mortality",
+  ) +
+  theme_classic();plot2
+
+ggsave(plot2, filename="figures/resazurin/mortality1.png", width=6, height=5)
+
+# Plot
+plot2a<-ggplot(full_data, aes(x = spat_treatment, y = predicted_mortality, color = temperature, fill = temperature, group=temperature)) +
+  geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
+  scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
+  scale_fill_manual(values=c("16C"="cyan4", "40C"="orange"))+
+  labs(
+    title = "",
+    y = "Probability of Mortality",
+  ) +
+  theme_classic();plot2a
+
+ggsave(plot2a, filename="figures/resazurin/mortality2.png", width=6, height=5)
+```
+
+
+
+
