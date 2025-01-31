@@ -14,9 +14,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-
-To do: Add size normalization, Add survival 
-
 This script analyzes resazurin assays for the PolyIC seed project. 
 
 # Set up 
@@ -121,9 +118,22 @@ full_data<-left_join(combined_data, metadata, by=c("date", "plate", "well"))%>%
 head(full_data)
 ```
 
+Load in size data. 
+
+```{r}
+size<-read_csv("data/resazurin/size.csv")%>%
+  mutate(date=as.character(date))%>%select(!notes)
+```
+
+Join with data. 
+
+```{r}
+full_data<-left_join(full_data, size, by=c("date", "plate", "well"))
+```
+
 ## Prep the data 
 
-Plot the data. 
+Plot the raw data. 
 
 ```{r}
 full_data%>%
@@ -211,6 +221,24 @@ full_data%>%
   theme_classic()
 ```
 
+Size normalize data. 
+```{r}
+full_data<-full_data%>%
+  mutate(value.mm=value/length.mm)
+```
+
+Plot again. 
+
+```{r}
+full_data%>%
+  ggplot(aes(x=timepoint, y=value.mm, colour=temperature, group=interaction(date, plate, well)))+
+  facet_wrap(~date)+
+  geom_point()+
+  geom_line()+
+  scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
+  theme_classic()
+```
+
 Remove unnecessary columns. 
 
 ```{r}
@@ -229,7 +257,7 @@ We will not be doing size normalization for this test.
 Plot raw data. 
 ```{r}
 full_data%>%
-  ggplot(aes(x=timepoint, y=value, colour=temperature, group=interaction(date, plate, well)))+
+  ggplot(aes(x=timepoint, y=value.mm, colour=temperature, group=interaction(date, plate, well)))+
   facet_wrap(~date*spat_treatment)+
   geom_point()+
   scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
@@ -239,7 +267,7 @@ full_data%>%
 
 ```{r}
 full_data%>%
-  ggplot(aes(x=timepoint, y=value, colour=spat_treatment, group=interaction(date, plate, well)))+
+  ggplot(aes(x=timepoint, y=value.mm, colour=spat_treatment, group=interaction(date, plate, well)))+
   facet_wrap(~temperature)+
   geom_point()+
   geom_line()+
@@ -248,7 +276,7 @@ full_data%>%
 ```
 
 ```{r}
-model<-lmer(value ~ timepoint * temperature * spat_treatment + (1|plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
+model<-lmer(value.mm ~ timepoint * temperature * spat_treatment + (1|plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
 
 summary(model)
 anova(model)
@@ -260,7 +288,7 @@ qqPlot(residuals(model))
 Residuals are violating normality. Attempt with cube root transformation. 
 
 ```{r}
-model<-lmer((1+value)^(1/3) ~ timepoint * temperature * spat_treatment + (1|plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
+model<-lmer((1+value.mm)^(1/3) ~ timepoint * temperature * spat_treatment + (1|plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
 
 summary(model)
 anova(model)
@@ -275,8 +303,26 @@ Plot model effects.
 plot(Effect(c("spat_treatment", "temperature"), model, residuals=TRUE))
 plot(Effect(c("timepoint"), model, residuals=TRUE))
 plot(Effect(c("timepoint", "temperature"), model, residuals=TRUE))
+plot(Effect(c("timepoint", "spat_treatment"), model, residuals=TRUE))
 ```
 
+View posthoc effects. 
+
+```{r}
+emm<-emmeans(model, ~spat_treatment|temperature|timepoint)
+pairs(emm)
+
+emm<-emmeans(model, ~spat_treatment|timepoint)
+pairs(emm)
+
+emm<-emmeans(model, ~timepoint|spat_treatment)
+pairs(emm)
+
+emm<-emmeans(model, ~temperature|timepoint)
+pairs(emm)
+```
+
+Metabolic rates are different between temperatures during time point 4-5. 
 
 ## Plotting 
 
@@ -285,10 +331,10 @@ Plot with individual points with geom smooth lines.
 ```{r}
 plot1<-full_data%>%
 
-  ggplot(aes(x=timepoint, y=value, color=temperature, fill=temperature))+
+  ggplot(aes(x=timepoint, y=value.mm, color=temperature, fill=temperature))+
   facet_grid(~date*tank*holding_tank)+
   geom_point(alpha=0.5)+
-  geom_smooth(aes(group=temperature))+
+  stat_smooth(aes(group=temperature))+
   scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
   scale_fill_manual(values=c("16C"="cyan4", "40C"="orange"))+
   theme_classic()+
@@ -296,9 +342,9 @@ plot1<-full_data%>%
 
 plot1a<-full_data%>%
 
-  ggplot(aes(x=timepoint, y=value, color=temperature, fill=temperature))+
+  ggplot(aes(x=timepoint, y=value.mm, color=temperature, fill=temperature, group=temperature))+
   geom_point(alpha=0.5)+
-  geom_smooth(aes(group=temperature))+
+  stat_smooth(method="loess")+
   scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
   scale_fill_manual(values=c("16C"="cyan4", "40C"="orange"))+
   theme_classic()+
@@ -308,7 +354,7 @@ ggsave(plot1a, filename="figures/resazurin/metabolism_temperature.png", width=7,
 
 plot1b<-full_data%>%
 
-  ggplot(aes(x=timepoint, y=value, color=tank, fill=tank))+
+  ggplot(aes(x=timepoint, y=value.mm, color=tank, fill=tank))+
   facet_grid(~temperature)+
   geom_point(alpha=0.5)+
   geom_smooth(aes(group=tank))+
@@ -318,7 +364,7 @@ plot1b<-full_data%>%
 
 plot1c<-full_data%>%
 
-  ggplot(aes(x=timepoint, y=value, color=spat_treatment, fill=spat_treatment))+
+  ggplot(aes(x=timepoint, y=value.mm, color=spat_treatment, fill=spat_treatment))+
   facet_grid(~temperature)+
   geom_point(alpha=0.5)+
   geom_smooth(aes(group=spat_treatment))+
@@ -329,7 +375,6 @@ plot1c<-full_data%>%
 
 ggsave(plot1c, filename="figures/resazurin/metabolism_treatment.png", width=7, height=5)
 ```
-
 
 # Survival 
 
