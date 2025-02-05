@@ -16,6 +16,8 @@ editor_options:
 
 This script analyzes survival assays for the PolyIC seed project. 
 
+Before running, click the arrow next to "knit" on the toolbar and select "project directory"
+
 # Set up 
 
 Set up workspace, set options, and load required packages.    
