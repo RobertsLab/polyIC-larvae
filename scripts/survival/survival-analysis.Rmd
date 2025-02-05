@@ -18,6 +18,7 @@ This script analyzes survival assays for the PolyIC seed project.
 
 Before running, click the arrow next to "knit" on the toolbar and select "project directory"
 
+
 # Set up 
 
 Set up workspace, set options, and load required packages.    
@@ -44,7 +45,8 @@ library(emmeans)
 ## Load data 
 
 ```{r}
-surv<-read_csv("data/survival/survival_assays.csv")%>%mutate(date=as.character(date))%>%select(!notes)
+surv<-read_csv("data/survival/survival_assays.csv")%>%mutate(date=as.character(date))%>%select(!notes)#%>%
+ # filter(!date=="20250204")
 ```
 
 Turn into long format. 
