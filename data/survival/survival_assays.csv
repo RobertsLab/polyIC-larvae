@@ -202,7 +202,7 @@ date,plate,well,temperature,treatment,tank,0,5,24,notes
 20250211,plate1,A09,16C,control,control-1,0,0,0,
 20250211,plate1,A10,16C,control,control-1,0,0,0,
 20250211,plate1,A11,16C,control,control-1,0,0,0,
-20250211,plate1,A12,16C,control,control-1,0,1,0,"no water at 5 hrs, refilled. Deemed dead at 5hr but seemed alive at 24h "
+20250211,plate1,A12,16C,control,control-1,0,1,1,"no water at 5 hrs, refilled. Deemed dead at 5hr but seemed alive at 24h "
 20250211,plate1,B01,16C,control,control-1,0,0,0,
 20250211,plate1,B02,16C,control,control-1,0,0,0,
 20250211,plate1,B03,16C,control,control-1,0,0,0,
