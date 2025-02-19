@@ -99,8 +99,8 @@ plot2a<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = treatment, 
   facet_wrap(~temperature)+
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
-  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
-  scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
+#  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
+ # scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
   labs(
     title = "",
     y = "Probability of Mortality",
@@ -124,6 +124,7 @@ plot3<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = tank, fill =
     y = "Probability of Mortality",
   ) +
   theme_classic();plot3
+
 ```
 
 
@@ -135,8 +136,8 @@ plot4<-surv%>%
   ggplot(aes(x = temperature, y = predicted_mortality, color = treatment, fill = treatment, group=treatment)) +
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
-  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
-  scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
+#  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
+#  scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
   labs(
     title = "",
     y = "Probability of Mortality at 24 h",
@@ -145,5 +146,8 @@ plot4<-surv%>%
 
 ggsave(plot4, filename="figures/survival/mortality_temperature_24h.png", width=6, height=5)
 ```
+
+
+
 
 
