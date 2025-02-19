@@ -99,8 +99,8 @@ plot2a<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = treatment, 
   facet_wrap(~temperature)+
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
-#  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
- # scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
+  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
+  scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
   labs(
     title = "",
     y = "Probability of Mortality",
