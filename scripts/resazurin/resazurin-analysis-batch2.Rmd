@@ -16,6 +16,8 @@ editor_options:
 
 This script analyzes resazurin assays for the PolyIC seed project. This analysis is for "batch 2" of seed brought back from the hatchery in early March. This batch was analyzed with the FLx800 plate reader instrument.    
 
+ADD: Metabolic rate ~ mortality 
+
 # Set up 
 
 Set up workspace, set options, and load required packages.    
@@ -399,20 +401,6 @@ ggsave(plot1d, filename="figures/resazurin/batch2_metabolism_temperature_treatme
 ```
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Survival 
 
 ## Load data 
@@ -435,7 +423,10 @@ Analyze with binomial logistic regression for effects of temperature and spat tr
 1 = mortality 
 
 ```{r}
-surv_model<-glmer(mortality ~ temperature * spat_treatment + (1|holding_tank) + (1|spat_treatment:tank), family = binomial(link = "logit"), data=full_data)
+surv_model_data<-full_data%>%
+  filter(timepoint=="4")
+  
+surv_model<-glmer(mortality ~ temperature * spat_treatment + (1|holding_tank) + (1|spat_treatment:tank), family = binomial(link = "logit"), data=surv_model_data)
 
 summary(surv_model)
 Anova(surv_model)
@@ -453,10 +444,10 @@ Generate predictive mortality.
 
 ```{r}
 # Generate predicted probabilities
-full_data$predicted_mortality <- predict(surv_model, type = "response")
+surv_model_data$predicted_mortality <- predict(surv_model, type = "response")
 
 # Plot
-plot2<-ggplot(full_data, aes(x = temperature, y = predicted_mortality, color = spat_treatment, fill = spat_treatment, group=spat_treatment)) +
+plot2<-ggplot(surv_model_data, aes(x = temperature, y = predicted_mortality, color = spat_treatment, fill = spat_treatment, group=spat_treatment)) +
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
   scale_colour_manual(values=c("darkgray", "darkred"))+
@@ -467,28 +458,28 @@ plot2<-ggplot(full_data, aes(x = temperature, y = predicted_mortality, color = s
   ) +
   theme_classic();plot2
 
-ggsave(plot2, filename="figures/resazurin/mortality_treatment.png", width=6, height=5)
+ggsave(plot2, filename="figures/resazurin/batch2-mortality_treatment.png", width=6, height=5)
 
 # Plot
-plot2a<-ggplot(full_data, aes(x = spat_treatment, y = predicted_mortality, color = temperature, fill = temperature, group=temperature)) +
+plot2a<-ggplot(surv_model_data, aes(x = spat_treatment, y = predicted_mortality, color = temperature, fill = temperature, group=temperature)) +
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
-  scale_colour_manual(values=c("16C"="cyan4", "40C"="orange"))+
-  scale_fill_manual(values=c("16C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_fill_manual(values=c("20C"="cyan4", "40C"="orange"))+
   labs(
     title = "",
     y = "Probability of Mortality",
   ) +
   theme_classic();plot2a
 
-ggsave(plot2a, filename="figures/resazurin/mortality_temperature.png", width=6, height=5)
+ggsave(plot2a, filename="figures/resazurin/batch2-mortality_temperature.png", width=6, height=5)
 ```
 
 Plot individual tanks. 
 
 ```{r}
 # Plot
-plot3<-ggplot(full_data, aes(x = temperature, y = predicted_mortality, color = tank, fill = tank, group=tank)) +
+plot3<-ggplot(surv_model_data, aes(x = temperature, y = predicted_mortality, color = tank, fill = tank, group=tank)) +
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
   labs(
