@@ -66,7 +66,7 @@ Analyze with binomial logistic regression for effects of temperature and spat tr
 1 = mortality 
 
 ```{r}
-surv_model<-glmer(mortality ~ temperature * treatment * hours + (1|tank) + (1|treatment:tank), family = binomial(link = "logit"), data=surv)
+surv_model<-glmer(mortality ~ temperature * treatment * hours + (1|tank) + (1|treatment:tank) + (1|batch), family = binomial(link = "logit"), data=surv)
 
 summary(surv_model)
 Anova(surv_model)
@@ -96,7 +96,7 @@ ggsave(plot2, filename="figures/survival/survival_temperature.png", width=6, hei
 
 # Plot
 plot2a<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = treatment, fill = treatment, group=treatment)) +
-  facet_wrap(~temperature)+
+  facet_wrap(~temperature*batch)+
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
   scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
@@ -116,7 +116,7 @@ Plot individual tanks.
 ```{r}
 # Plot
 plot3<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = tank, fill = tank, group=tank)) +
-  facet_wrap(~temperature)+
+  facet_wrap(~temperature*batch)+
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
   labs(
@@ -133,7 +133,7 @@ plot3<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = tank, fill =
 surv_model<-surv%>%
   filter(hours=="24")%>%
   
-  glmer(mortality ~ temperature * treatment + (1|tank) + (1|treatment:tank), family = binomial(link = "logit"), data=.)
+  glmer(mortality ~ temperature * treatment + (1|tank) + (1|treatment:tank) + (1|batch), family = binomial(link = "logit"), data=.)
 
 summary(surv_model)
 Anova(surv_model)
