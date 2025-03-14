@@ -155,7 +155,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()
 ```
 
@@ -175,7 +175,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()
 ```
 
@@ -187,7 +187,7 @@ full_data%>%
   ggplot(aes(x=timepoint, y=fluorescence.norm, colour=temperature, group=interaction(date, plate, well)))+
   facet_wrap(~date)+
   geom_point()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   geom_line()+
   theme_classic()
 ```
@@ -208,7 +208,7 @@ blanks%>%
   ggplot(aes(x=timepoint, y=mean_blank, colour=temperature))+
   facet_wrap(~date)+
   geom_point()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()
 ```
 
@@ -230,7 +230,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()
 ```
 
@@ -248,7 +248,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()
 ```
 
@@ -273,7 +273,7 @@ full_data%>%
   ggplot(aes(x=timepoint, y=value.mm, colour=temperature, group=interaction(date, plate, well)))+
   facet_wrap(~date*spat_treatment)+
   geom_point()+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   geom_line()+
   theme_classic()
 ```
@@ -346,8 +346,8 @@ plot1<-full_data%>%
   facet_grid(~date*tank*holding_tank)+
   geom_point(alpha=0.5)+
   stat_smooth(aes(group=temperature))+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
-  scale_fill_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1
 
@@ -356,8 +356,8 @@ plot1a<-full_data%>%
   ggplot(aes(x=timepoint, y=value.mm, color=temperature, fill=temperature, group=temperature))+
   geom_point(alpha=0.5)+
   stat_smooth(method="loess")+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
-  scale_fill_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1a
 
@@ -392,8 +392,8 @@ plot1d<-full_data%>%
   facet_grid(~spat_treatment)+
   geom_point(alpha=0.5)+
   stat_smooth(method="loess")+
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
-  scale_fill_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1d
 
@@ -464,8 +464,8 @@ ggsave(plot2, filename="figures/resazurin/batch2-mortality_treatment.png", width
 plot2a<-ggplot(surv_model_data, aes(x = spat_treatment, y = predicted_mortality, color = temperature, fill = temperature, group=temperature)) +
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
-  scale_colour_manual(values=c("20C"="cyan4", "40C"="orange"))+
-  scale_fill_manual(values=c("20C"="cyan4", "40C"="orange"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
   labs(
     title = "",
     y = "Probability of Mortality",
