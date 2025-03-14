@@ -66,6 +66,8 @@ Analyze with binomial logistic regression for effects of temperature and spat tr
 1 = mortality 
 
 ```{r}
+surv<-surv%>%filter(!c(date=="20250312" & hours=="5"))
+
 surv_model<-glmer(mortality ~ temperature * treatment * hours + (1|tank) + (1|treatment:tank) + (1|batch), family = binomial(link = "logit"), data=surv)
 
 summary(surv_model)
