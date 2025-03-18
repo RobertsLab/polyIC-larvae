@@ -155,7 +155,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()
 ```
 
@@ -175,7 +175,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()
 ```
 
@@ -187,7 +187,7 @@ full_data%>%
   ggplot(aes(x=timepoint, y=fluorescence.norm, colour=temperature, group=interaction(date, plate, well)))+
   facet_wrap(~date)+
   geom_point()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   geom_line()+
   theme_classic()
 ```
@@ -208,7 +208,7 @@ blanks%>%
   ggplot(aes(x=timepoint, y=mean_blank, colour=temperature))+
   facet_wrap(~date)+
   geom_point()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()
 ```
 
@@ -230,7 +230,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()
 ```
 
@@ -248,7 +248,7 @@ full_data%>%
   facet_wrap(~date)+
   geom_point()+
   geom_line()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()
 ```
 
@@ -273,7 +273,7 @@ full_data%>%
   ggplot(aes(x=timepoint, y=value.mm, colour=temperature, group=interaction(date, plate, well)))+
   facet_wrap(~date*spat_treatment)+
   geom_point()+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   geom_line()+
   theme_classic()
 ```
@@ -310,15 +310,6 @@ rand(model)
 qqPlot(residuals(model))
 ```
 
-Plot model effects. 
-
-```{r}
-plot(Effect(c("spat_treatment", "temperature"), model, residuals=TRUE))
-plot(Effect(c("timepoint"), model, residuals=TRUE))
-plot(Effect(c("timepoint", "temperature"), model, residuals=TRUE))
-plot(Effect(c("timepoint", "spat_treatment"), model, residuals=TRUE))
-```
-
 View posthoc effects. 
 
 ```{r}
@@ -335,6 +326,8 @@ emm<-emmeans(model, ~temperature|timepoint)
 pairs(emm)
 ```
 
+Treated and control rates are different at 36C and 40C, but not at 20C or 42C.  
+
 ## Plotting 
 
 Plot with individual points with geom smooth lines. 
@@ -346,8 +339,8 @@ plot1<-full_data%>%
   facet_grid(~date*tank*holding_tank)+
   geom_point(alpha=0.5)+
   stat_smooth(aes(group=temperature))+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
-  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1
 
@@ -356,8 +349,8 @@ plot1a<-full_data%>%
   ggplot(aes(x=timepoint, y=value.mm, color=temperature, fill=temperature, group=temperature))+
   geom_point(alpha=0.5)+
   stat_smooth(method="loess")+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
-  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1a
 
@@ -392,14 +385,13 @@ plot1d<-full_data%>%
   facet_grid(~spat_treatment)+
   geom_point(alpha=0.5)+
   stat_smooth(method="loess")+
-  scale_colour_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
-  scale_fill_manual(values=c("20C"="cyan4", "36C"="orange", "40C"="darkred"))+
+  scale_colour_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
+  scale_fill_manual(values=c("20C"="cyan4", "36C"="purple2", "40C"="orange", "42C"="darkred"))+
   theme_classic()+
   xlab("Hour");plot1d
 
 ggsave(plot1d, filename="figures/resazurin/batch2_metabolism_temperature_treatment.png", width=8, height=5)
 ```
-
 
 # Survival 
 
