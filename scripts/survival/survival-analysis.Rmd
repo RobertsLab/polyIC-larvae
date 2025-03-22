@@ -109,8 +109,20 @@ plot2a<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = treatment, 
   ) +
   theme_classic();plot2a 
 
+# Plot
+plot2b<-ggplot(surv, aes(x = hours, y = predicted_mortality, color = treatment, fill = treatment, group=treatment)) +
+  facet_wrap(~temperature)+
+  geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+  scale_colour_manual(values=c("control"="cyan4", "treated"="orange"))+
+  scale_fill_manual(values=c("control"="cyan4", "treated"="orange"))+
+  labs(
+    title = "",
+    y = "Probability of Mortality",
+  ) +
+  theme_classic();plot2b 
 
-ggsave(plot2a, filename="figures/survival/mortality_temperature.png", width=6, height=5)
+ggsave(plot2b, filename="figures/survival/mortality_temperature.png", width=6, height=5)
 ```
 
 Plot individual tanks. 
@@ -150,7 +162,7 @@ emm<-emmeans(surv_model, ~treatment|temperature)
 pairs(emm)
 ```
 
-Mortality significantly higher in control at 40C and 45C 
+Mortality significantly higher in treated at 42C. Mortality significantly higher in control at 40C. Slight but not significant higher mortality in control at 45C.  
 
 ```{r}
 # Plot
