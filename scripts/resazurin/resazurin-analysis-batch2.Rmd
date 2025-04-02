@@ -16,7 +16,7 @@ editor_options:
 
 This script analyzes resazurin assays for the PolyIC seed project. This analysis is for "batch 2" of seed brought back from the hatchery in early March. This batch was analyzed with the FLx800 plate reader instrument.    
 
-ADD: Metabolic rate ~ mortality 
+ADD: Metabolic rate ~ mortality; ending mortality in TPC format 
 
 # Set up 
 
@@ -370,8 +370,8 @@ plot1c<-full_data%>%
   facet_grid(~temperature)+
   geom_point(alpha=0.5)+
   geom_smooth(aes(group=spat_treatment))+
-  scale_colour_manual(values=c("control"="darkgray", "treated"="darkred"))+
-  scale_fill_manual(values=c("control"="darkgray", "treated"="darkred"))+
+  scale_colour_manual(values=c("control"="darkgray", "treated"="purple4"))+
+  scale_fill_manual(values=c("control"="darkgray", "treated"="purple4"))+
   theme_classic()+
   xlab("Hour");plot1c
 
@@ -480,4 +480,110 @@ plot3<-ggplot(surv_model_data, aes(x = temperature, y = predicted_mortality, col
 ```
 
 
+# Metabolic rates ~ mortality 
 
+Plot metabolic rates at 42°C (treatment with highest mortality) for those that lived and those that died in each treatment. 
+
+```{r}
+data_42C<-full_data%>%
+  filter(temperature=="42C")%>%
+  mutate(temperature_num = as.numeric(str_extract(temperature, "\\d+")))
+
+str(data_42C)
+```
+
+Plot
+
+```{r}
+plot4<-ggplot(data_42C, aes(x = timepoint, y = value.mm, color = as.factor(mortality), fill = as.factor(mortality))) +
+  facet_wrap(~spat_treatment)+
+  geom_point(alpha = 0.6, position = position_jitter(height = 0.03)) +
+  stat_smooth(aes(group=mortality)) +
+  scale_colour_manual(values=c("darkgray", "darkred"), labels=c("alive", "dead"), name="Mortality")+
+  scale_fill_manual(values=c("darkgray", "darkred"), labels=c("alive", "dead"), name="Mortality")+
+  labs(
+    title = "",
+    y = "Metabolic Rate",
+    x = "Hours"
+  ) +
+  theme_classic();plot4
+```
+
+Analyze the effect of mortality on metabolic rates. 
+```{r}
+mortality_model<-lmer(value.mm ~ timepoint * mortality * spat_treatment + (1|holding_tank) + (1|spat_treatment:tank), data=data_42C)
+
+summary(mortality_model)
+Anova(mortality_model)
+```
+
+Time and mortality are significant 
+
+Plot again without treatment. 
+
+```{r}
+plot4a<-ggplot(data_42C, aes(x = timepoint, y = value.mm, color = as.factor(mortality), fill = as.factor(mortality))) +
+  geom_point(alpha = 0.6, position = position_jitter(height = 0.03)) +
+  stat_smooth(aes(group=mortality)) +
+  scale_colour_manual(values=c("cyan4", "orange"), labels=c("alive", "dead"), name="Mortality")+
+  scale_fill_manual(values=c("cyan4", "orange"), labels=c("alive", "dead"), name="Mortality")+
+  labs(
+    title = "",
+    y = "Metabolic Rate",
+    x = "Hours"
+  ) +
+  theme_classic();plot4a
+
+ggsave(plot4a, filename="figures/resazurin/batch2-mortality_metabolic_rates_42C.png", width=5, height=5)
+```
+
+# Metabolic rates across thermal range 
+
+Subset data for the ending time point, which indicates change in fluorescence over the entire trial. 
+
+```{r}
+end_data<-full_data%>%
+  filter(timepoint=="4")%>%
+  mutate(temperature_num = as.numeric(str_extract(temperature, "\\d+")))
+
+head(end_data)
+```
+
+Plot metabolic rates for each treatment over the temperatures. 
+
+```{r}
+plot5<-ggplot(end_data, aes(x = temperature, y = value.mm, color = spat_treatment, fill = spat_treatment, group=spat_treatment)) +
+  geom_point(alpha = 0.6, position = position_jitter(height = 0.03)) +
+  stat_smooth(aes(group=spat_treatment)) +
+  scale_colour_manual(values=c("cyan4", "orange"))+
+  scale_fill_manual(values=c("cyan4", "orange"))+
+  labs(
+    title = "",
+    y = "Metabolic Rate",
+  ) +
+  theme_classic();plot5
+
+plot5a<-ggplot(end_data, aes(x = temperature, y = value.mm)) +
+  geom_point(alpha = 0.6, position = position_jitter(height = 0.03), colour="darkgray") +
+  stat_smooth(aes(group=1), colour="black", method="loess") +
+  #scale_colour_manual(values=c("darkgray", "darkred"))+
+  #scale_fill_manual(values=c("darkgray", "darkred"))+
+  labs(
+    title = "",
+    y = "Metabolic Rate",
+  ) +
+  theme_classic();plot5a
+
+ggsave(plot5a, filename="figures/resazurin/batch2-tpc.png", width=6, height=5)
+```
+
+Analyze effect of temperature. 
+
+```{r}
+tpc_model<-lmer(value.mm ~ temperature + (1|holding_tank) + (1|spat_treatment:tank), data=end_data)
+
+summary(tpc_model)
+Anova(tpc_model)
+```
+
+Temperature is significant 
