@@ -368,14 +368,15 @@ plot1c<-full_data%>%
 
   ggplot(aes(x=timepoint, y=value.mm, color=spat_treatment, fill=spat_treatment))+
   facet_grid(~temperature)+
-  geom_point(alpha=0.5)+
+  geom_point(alpha=0.1)+
   geom_smooth(aes(group=spat_treatment))+
-  scale_colour_manual(values=c("control"="darkgray", "treated"="purple4"))+
-  scale_fill_manual(values=c("control"="darkgray", "treated"="purple4"))+
+  scale_colour_manual(values=c("control"="darkgray", "treated"="purple2"), name="Parental \nTreatment")+
+  scale_fill_manual(values=c("control"="darkgray", "treated"="purple2"), name="Parental \nTreatment")+
   theme_classic()+
+  ylab("Metabolic Rate")+
   xlab("Hour");plot1c
 
-ggsave(plot1c, filename="figures/resazurin/batch2_metabolism_treatment.png", width=7, height=5)
+ggsave(plot1c, filename="figures/resazurin/batch2_metabolism_treatment.png", width=7, height=4)
 
 plot1d<-full_data%>%
 
@@ -449,6 +450,20 @@ plot2<-ggplot(surv_model_data, aes(x = temperature, y = predicted_mortality, col
   theme_classic();plot2
 
 ggsave(plot2, filename="figures/resazurin/batch2-mortality_treatment.png", width=6, height=5)
+
+# Plot
+plot2b<-ggplot(surv_model_data, aes(x = temperature, y = predicted_mortality)) +
+  geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03), colour="darkgray") +
+  geom_smooth(aes(group=1), method = "glm", method.args = list(family = "binomial"), se = TRUE, colour="black", fill="darkgray") +
+  #scale_colour_manual(values=c("darkgray", "darkred"))+
+  #scale_fill_manual(values=c("darkgray", "darkred"))+
+  labs(
+    title = "",
+    y = "Probability of Mortality",
+  ) +
+  theme_classic();plot2b
+
+ggsave(plot2b, filename="figures/resazurin/batch2-mortality_all.png", width=6, height=5)
 
 # Plot
 plot2a<-ggplot(surv_model_data, aes(x = spat_treatment, y = predicted_mortality, color = temperature, fill = temperature, group=temperature)) +
