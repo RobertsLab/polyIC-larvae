@@ -370,8 +370,8 @@ plot1c<-full_data%>%
   facet_grid(~temperature)+
   geom_point(alpha=0.1)+
   geom_smooth(aes(group=spat_treatment))+
-  scale_colour_manual(values=c("control"="darkgray", "treated"="purple2"), name="Parental \nTreatment")+
-  scale_fill_manual(values=c("control"="darkgray", "treated"="purple2"), name="Parental \nTreatment")+
+  scale_colour_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment")+
+  scale_fill_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment")+
   theme_classic()+
   ylab("Metabolic Rate")+
   xlab("Hour");plot1c
@@ -462,6 +462,7 @@ plot2b<-ggplot(surv_model_data, aes(x = temperature, y = predicted_mortality)) +
     y = "Probability of Mortality",
   ) +
   theme_classic();plot2b
+
 
 ggsave(plot2b, filename="figures/resazurin/batch2-mortality_all.png", width=6, height=5)
 
@@ -585,7 +586,7 @@ plot5a<-ggplot(end_data, aes(x = temperature, y = value.mm)) +
   #scale_fill_manual(values=c("darkgray", "darkred"))+
   labs(
     title = "",
-    y = "Metabolic Rate",
+    y = "Metabolic Rate", x = "Temperature"
   ) +
   theme_classic();plot5a
 

@@ -172,11 +172,11 @@ plot4<-surv%>%
   ggplot(aes(x = temperature, y = predicted_mortality, color = treatment, fill = treatment, group=treatment)) +
   geom_point(aes(y = mortality), alpha = 0.6, position = position_jitter(height = 0.03)) +
   geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
- scale_colour_manual(values=c("control"="darkgray", "treated"="purple2"), name="Parental \nTreatment")+
- scale_fill_manual(values=c("control"="darkgray", "treated"="purple2"), name="Parental \nTreatment")+
+ scale_colour_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment")+
+ scale_fill_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment")+
   labs(
     title = "",
-    y = "Probability of Mortality",
+    y = "Probability of Mortality", x = "Temperature"
   ) +
   theme_classic();plot4
 
