@@ -181,11 +181,41 @@ ggplot(growth, aes(x = date, y = length.mm, color = treatment)) +
     color = "Parental \nTreatment"
   ) +
   scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
-  theme_minimal(base_size = 14) +
+  theme_minimal (base_size = 14) +
   scale_x_date(date_labels = "%b %d", date_breaks = "1 week") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+ 
+  
 
 ggsave(plot1, filename="figures/growth/growth_time_12/2-02/24.png", width=6, height=5)
+
+```
+
+
+ ggplot(growth, aes(x = date, y = length.mm, color = treatment)) +
+  geom_point(alpha = 0.3) +  
+  geom_smooth(method = "lm", se = TRUE) +  
+  labs(title = "Oyster Growth with Linear Trend Lines",
+    x = "Date (2024-2025)",
+    y = "Shell Length (mm)",
+     color = "Parental \nTreatment"   ) +
+ scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
+ theme_minimal(base_size = 14) +
+ scale_x_date(date_labels = "%b %d", date_breaks = "1 week") +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+ theme_classic()
+
+stats
+
+```{r}
+# Assuming 'growth' is your data frame
+# Fit a linear model for each treatment
+lm_control <- lm(length.mm ~ date, data = subset(growth, treatment == "control"))
+lm_treatment <- lm(length.mm ~ date, data = subset(growth, treatment == "treatment"))
+
+# Summary of the models
+summary(lm_control)
+summary(lm_treatment)
 
 ```
 
