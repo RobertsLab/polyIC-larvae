@@ -368,11 +368,14 @@ plot1c<-full_data%>%
 
   ggplot(aes(x=timepoint, y=value.mm, color=spat_treatment, fill=spat_treatment))+
   facet_grid(~temperature)+
-  geom_point(alpha=0.1)+
   geom_smooth(aes(group=spat_treatment))+
   scale_colour_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment")+
   scale_fill_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment")+
   theme_classic()+
+    theme(axis.text.y = element_text(size = 17)) +
+  theme(axis.text.x = element_text(size = 17))+
+ theme(axis.title.x = element_text(size = 17)) +
+   theme(axis.title.y = element_text(size = 17))+ 
   ylab("Metabolic Rate")+
   xlab("Hour");plot1c
 
@@ -580,7 +583,8 @@ plot5<-ggplot(end_data, aes(x = temperature, y = value.mm, color = spat_treatmen
   theme_classic();plot5
 
 plot5a<-ggplot(end_data, aes(x = temperature, y = value.mm)) +
-  geom_point(alpha = 0.6, position = position_jitter(height = 0.03), colour="darkgray") +
+  geom_point(alpha = 0.6, position = position_jitter(height = 0.03) +
+  colour="darkgray") +
   stat_smooth(aes(group=1), colour="black", method="loess") +
   #scale_colour_manual(values=c("darkgray", "darkred"))+
   #scale_fill_manual(values=c("darkgray", "darkred"))+
@@ -588,9 +592,13 @@ plot5a<-ggplot(end_data, aes(x = temperature, y = value.mm)) +
     title = "",
     y = "Metabolic Rate", x = "Temperature"
   ) +
-  theme_classic();plot5a
+  theme_classic() +
+   theme(axis.text.y = element_text(size = 17))+
+  theme(axis.text.x = element_text(size = 17))+
+ theme(axis.title.x = element_text(size = 17)) +
+   theme(axis.title.y = element_text(size = 17)) ;plot5a
 
-ggsave(plot5a, filename="figures/resazurin/batch2-tpc.png", width=6, height=5)
+ggsave(plot5a, filename="figures/resazurin/batch2-tpc.png", width=7, height=5)
 ```
 
 Analyze effect of temperature. 

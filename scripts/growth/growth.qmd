@@ -36,7 +36,7 @@ growth <- read_csv("~/Desktop/GitHub/polyIC-larvae/data/growth/growth.csv)
     col_types = cols(date = col_number()
 
  setwd("~/Desktop/GitHub/polyIC-larvae/scripts/growth")
- 
+
 
  View(growth)
 # change date format
@@ -72,8 +72,7 @@ ggplot(growth, aes(x = date, y = length.mm, color = treatment, group = treatment
        y = "Length (mm)") +
   scale_color_manual(
     values = c("control" = "cyan3", "treatment" = "coral1"),
-    name = "Parental \nTreatment"
-  )
+    name = "Parental \nTreatment")
 
 ```
 Faceted Line Plot
@@ -171,8 +170,7 @@ ggplot(growth_summary, aes(x = date, y = mean_length, color = treatment, group =
 
 Plot with linear trend lines !!
 ```{r}
-ggplot(growth, aes(x = date, y = length.mm, color = treatment)) +
-  geom_point(alpha = 0.3) +  # Show raw points with transparency
+plot1 <-ggplot(growth, aes(x = date, y = length.mm, color = treatment)) +
   geom_smooth(method = "lm", se = TRUE) +  # Linear model per treatment
   labs(
     title = "Oyster Growth with Linear Trend Lines",
@@ -181,13 +179,17 @@ ggplot(growth, aes(x = date, y = length.mm, color = treatment)) +
     color = "Parental \nTreatment"
   ) +
   scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
-  theme_minimal (base_size = 14) +
+  theme_classic() +
   scale_x_date(date_labels = "%b %d", date_breaks = "1 week") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 16)) +
+   theme(axis.text.y = element_text(size = 17)) +
+  theme(axis.text.x = element_text(size = 17)) +
+ theme(axis.title.x = element_text(size = 17)) +
+   theme(axis.title.y = element_text(size = 17)) ;plot1
  
   
 
-ggsave(plot1, filename="figures/growth/growth_time_12/2-02/24.png", width=6, height=5)
+ggsave(plot1, filename="figures/growth/growth.png", width=8, height=5)
 
 ```
 
@@ -202,7 +204,8 @@ ggsave(plot1, filename="figures/growth/growth_time_12/2-02/24.png", width=6, hei
  scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
  theme_minimal(base_size = 14) +
  scale_x_date(date_labels = "%b %d", date_breaks = "1 week") +
- theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 16)) +
+   theme(axis.text.y = element_text(size = 16)) +
  theme_classic()
 
 stats
