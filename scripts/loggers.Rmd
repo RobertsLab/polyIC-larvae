@@ -100,7 +100,7 @@ ggsave(temp_plot, filename="figures/environmental/PolyIC_PointWhitney.png", widt
 FTR tanks (UW)
 ```{r}
 temp_plot2<-tidbits%>%
-  filter(group==c("ftr-tanks", "ftr-incubations"))%>%
+  filter(group==c("ftr-tanks"))%>%
   
   ggplot(aes(x=DateTime, y=temp.C))+
   facet_wrap(~logger)+
@@ -111,6 +111,17 @@ temp_plot2<-tidbits%>%
   ggtitle("FTR Tanks")+
   #ylim(0,32)+
   theme_classic(); temp_plot2
-```
 
-Some of these are from incubations and others are from the tanks. I need to look back at my notes to determine which time slots we want to pull for loggers.  
+temp_plot3<-tidbits%>%
+  filter(group==c("ftr-incubations"))%>%
+  
+  ggplot(aes(x=DateTime, y=temp.C))+
+  facet_wrap(~logger)+
+  geom_point(alpha=0.7, color="darkgray")+
+  geom_smooth(color="black")+
+  ylab("Temperature (°C)")+
+  xlab("Date")+
+  ggtitle("FTR Incubations")+
+  #ylim(0,32)+
+  theme_classic(); temp_plot3
+```
