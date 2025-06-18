@@ -37,6 +37,10 @@ growth <- read_csv("~/Desktop/GitHub/polyIC-larvae/data/growth/growth.csv)
 
  setwd("~/Desktop/GitHub/polyIC-larvae/scripts/growth")
 
+### library(readr)
+growth <- read_csv("data/growth/growth.csv", 
+    col_types = cols(length.mm = col_number()))
+View(growth)
 
  View(growth)
 # change date format
