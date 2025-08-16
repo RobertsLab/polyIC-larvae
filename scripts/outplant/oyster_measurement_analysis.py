@@ -101,8 +101,8 @@ class OysterAnalyzer:
         # Detect oysters
         oyster_contours = self.detect_oysters(image, thresh)
         
-        # Sort contours by area (largest first) and take top 30
-        oyster_contours = sorted(oyster_contours, key=cv2.contourArea, reverse=True)[:30]
+        # Sort contours by area (largest first) - measure all detected oysters
+        oyster_contours = sorted(oyster_contours, key=cv2.contourArea, reverse=True)
         
         print(f"Found {len(oyster_contours)} oysters in {image_path.name}")
         

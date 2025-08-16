@@ -6,7 +6,7 @@ Automated analysis of oyster images from outplant/sequim/size directory using co
 ## Analysis Details
 - **Date of Analysis**: 2025-01-27
 - **Total Images Analyzed**: 8
-- **Total Oysters Measured**: 240 (30 per image)
+- **Total Oysters Measured**: 1,007 total oysters across all images
 - **Date in Images**: 20250626 (June 26, 2025)
 
 ## Image Files Analyzed
@@ -22,29 +22,29 @@ Automated analysis of oyster images from outplant/sequim/size directory using co
 ## Measurement Summary
 
 ### Overall Statistics
-- **Average Length**: 20.61 mm
-- **Average Width**: 13.51 mm
-- **Total Measurements**: 240 oysters
+- **Average Length**: 14.53 mm
+- **Average Width**: 8.62 mm
+- **Total Measurements**: 1,007 oysters
 
 ### Summary by Tag
 | Tag | Count | Length (mm) | Width (mm) |
 |-----|-------|-------------|------------|
 |     |       | Mean ± Std  | Mean ± Std |
-| 013 | 30    | 17.19 ± 5.76 | 11.46 ± 3.05 |
-| 014 | 30    | 18.16 ± 8.86 | 12.16 ± 4.06 |
-| 015 | 30    | 18.03 ± 4.20 | 12.88 ± 3.66 |
-| 016 | 30    | 19.06 ± 5.09 | 13.22 ± 3.33 |
-| 017 | 30    | 25.22 ± 16.44 | 14.80 ± 5.49 |
-| 018 | 30    | 17.76 ± 5.91 | 12.56 ± 3.15 |
-| 019 | 30    | 25.24 ± 22.44 | 15.45 ± 10.60 |
-| 020 | 30    | 24.23 ± 19.67 | 15.54 ± 7.21 |
+| 013 | 124   | 13.00 ± 5.70 | 7.84 ± 3.14 |
+| 014 | 112   | 13.69 ± 6.61 | 8.37 ± 3.88 |
+| 015 | 116   | 13.97 ± 5.31 | 8.59 ± 3.93 |
+| 016 | 125   | 14.42 ± 6.07 | 8.62 ± 3.81 |
+| 017 | 134   | 16.29 ± 12.02 | 8.84 ± 4.81 |
+| 018 | 130   | 13.59 ± 5.73 | 8.43 ± 3.48 |
+| 019 | 135   | 15.60 ± 12.45 | 9.16 ± 6.43 |
+| 020 | 131   | 15.35 ± 11.65 | 9.00 ± 5.34 |
 
 ## Data Structure
 The CSV file contains the following columns:
 - **Image**: Filename of the analyzed image
 - **Date**: Date extracted from filename (20250626)
 - **Tag**: Green tag ID (013-020)
-- **Oyster**: Oyster identifier (oyster1-oyster30)
+- **Oyster**: Oyster identifier (oyster1-oysterN, where N varies by image)
 - **Length**: Longest length measurement in mm
 - **Width**: Longest width measurement in mm
 
@@ -52,7 +52,7 @@ The CSV file contains the following columns:
 - **Detection Method**: Computer vision contour detection with area and aspect ratio filtering
 - **Measurement Method**: Rotated bounding rectangle analysis
 - **Pixel to mm Conversion**: Estimated ratio of 0.1 (may need calibration with known reference)
-- **Quality Control**: Top 30 largest detected objects per image
+- **Quality Control**: All detected objects per image, sorted by size
 - **Annotated Images**: Generated with bounding boxes and oyster numbers for verification
 
 ## Files Generated
