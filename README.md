@@ -2,6 +2,8 @@
 
 In this project, we exposed broodstock to PolyIC immersion right before spawning (2 h). This project tracks the offspring of these parents to test for immune priming parental effects. This is a brief overview of the project.  
 
+> **📖 For a general audience summary of this research, see [GENERAL_AUDIENCE_SUMMARY.md](GENERAL_AUDIENCE_SUMMARY.md)**  
+
 ## Spawning 
 
 Oysters were spawned at Point Whitney using their production workflow. Spawning was conducting using pooled egg and sperm from Control and Treated broodstock using approximately equal number of parents contributing to each pool.  
