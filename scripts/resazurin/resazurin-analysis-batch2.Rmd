@@ -16,8 +16,6 @@ editor_options:
 
 This script analyzes resazurin assays for the PolyIC seed project. This analysis is for "batch 2" of seed brought back from the hatchery in early March. This batch was analyzed with the FLx800 plate reader instrument.    
 
-ADD: Metabolic rate ~ mortality; ending mortality in TPC format 
-
 # Set up 
 
 Set up workspace, set options, and load required packages.    
@@ -291,7 +289,7 @@ model<-lmer(value.mm ~ timepoint * temperature * spat_treatment + (1|date:plate:
 
 summary(model)
 anova(model)
-rand(model)
+#rand(model)
 
 qqPlot(residuals(model))
 ```
@@ -303,7 +301,7 @@ model<-lmer((1+value.mm)^(1/3) ~ timepoint * temperature * spat_treatment + (1|d
 
 summary(model)
 anova(model)
-rand(model)
+#rand(model)
 
 qqPlot(residuals(model))
 ```
@@ -558,56 +556,106 @@ ggsave(plot4a, filename="figures/resazurin/batch2-mortality_metabolic_rates_42C.
 
 # Metabolic rates across thermal range 
 
-Subset data for the ending time point, which indicates change in fluorescence over the entire trial. 
+Calculate area under the curve 
 
 ```{r}
-end_data<-full_data%>%
-  filter(timepoint=="4")%>%
+library(pracma)
+
+head(full_data)
+
+auc_data<-full_data%>%
+  mutate(time=as.numeric(timepoint))%>%
+  group_by(date, plate, well, temperature, spat_treatment, tank, holding_tank)%>%
+  summarise(AUC = trapz(time, value.mm))%>%
   mutate(temperature_num = as.numeric(str_extract(temperature, "\\d+")))
 
-head(end_data)
+head(auc_data)
 ```
 
-Plot metabolic rates for each treatment over the temperatures. 
+```{r}
+hist(auc_data$AUC)
+```
+
+
+Plot total metabolic activity for each treatment over the temperatures. 
 
 ```{r}
-plot5<-ggplot(end_data, aes(x = temperature, y = value.mm, color = spat_treatment, fill = spat_treatment, group=spat_treatment)) +
-  geom_point(alpha = 0.6, position = position_jitter(height = 0.03)) +
+plot5<-ggplot(auc_data, aes(x = temperature, y = AUC, color = spat_treatment, fill = spat_treatment, group=spat_treatment)) +
+  geom_point(alpha = 0.6, position = position_jitter(height = 0.01)) +
   stat_smooth(aes(group=spat_treatment)) +
-  scale_colour_manual(values=c("cyan4", "orange"))+
-  scale_fill_manual(values=c("cyan4", "orange"))+
+  scale_colour_manual(values = c("control" = "cyan3", "treated" = "coral1"), name="Parental \nTreatment")+
+  scale_fill_manual(values = c("control" = "cyan3", "treated" = "coral1"), name="Parental \nTreatment")+
   labs(
-    title = "",
-    y = "Metabolic Rate",
+    title = "A",
+    y = "AUC",
+    x="Temperature"
   ) +
-  theme_classic();plot5
+  theme_classic(base_size = 16);plot5
 
-plot5a<-ggplot(end_data, aes(x = temperature, y = value.mm)) +
-  geom_point(alpha = 0.6, position = position_jitter(height = 0.03) +
-  colour="darkgray") +
-  stat_smooth(aes(group=1), colour="black", method="loess") +
-  #scale_colour_manual(values=c("darkgray", "darkred"))+
-  #scale_fill_manual(values=c("darkgray", "darkred"))+
-  labs(
-    title = "",
-    y = "Metabolic Rate", x = "Temperature"
-  ) +
-  theme_classic() +
-   theme(axis.text.y = element_text(size = 17))+
-  theme(axis.text.x = element_text(size = 17))+
- theme(axis.title.x = element_text(size = 17)) +
-   theme(axis.title.y = element_text(size = 17)) ;plot5a
 
-ggsave(plot5a, filename="figures/resazurin/batch2-tpc.png", width=7, height=5)
 ```
 
-Analyze effect of temperature. 
+Analyze effect of temperature on AUC. 
 
 ```{r}
-tpc_model<-lmer(value.mm ~ temperature + (1|holding_tank) + (1|spat_treatment:tank), data=end_data)
+tpc_model<-lmer(log(1+AUC) ~ temperature * spat_treatment + (1|holding_tank), data=auc_data)
 
 summary(tpc_model)
-Anova(tpc_model)
+anova(tpc_model)
+qqPlot(residuals(tpc_model))
 ```
 
-Temperature is significant 
+Temperature x treatment is significant 
+
+```{r}
+emm<-emmeans(tpc_model, ~spat_treatment|temperature)
+pairs(emm)
+```
+
+Generate a model prediction plot. 
+```{r}
+# Create a grid of temperature and spat_treatment values
+pred_grid <- expand.grid(
+  temperature = levels(as.factor(auc_data$temperature)),
+  spat_treatment = levels(as.factor(auc_data$spat_treatment)),  # use levels to ensure factor
+  holding_tank = NA  # we will ignore random effect
+)
+
+# Make spat_treatment a factor
+pred_grid$spat_treatment <- factor(pred_grid$spat_treatment, levels = levels(as.factor(auc_data$spat_treatment)))
+pred_grid$temperature <- factor(pred_grid$temperature, levels = levels(as.factor(auc_data$temperature)))
+
+# Predicted values (log scale)
+pred_grid$logAUC_pred <- predict(tpc_model, newdata = pred_grid, re.form = NA)
+
+# Back-transform to original AUC scale
+pred_grid$AUC_pred <- exp(pred_grid$logAUC_pred) - 1
+
+plot5 <- ggplot() +
+  # Raw points
+  geom_point(data = auc_data,
+             aes(x = temperature, y = AUC, color = spat_treatment),
+             alpha = 0.3, position = position_jitter(height = 0.01)) +
+  # Model predicted lines
+  geom_line(data = pred_grid,
+            aes(x = temperature, y = AUC_pred, color = spat_treatment, group = spat_treatment),
+            linewidth = 1.5) +
+  # Colors
+  scale_colour_manual(values = c("control" = "cyan3", "treated" = "coral1"),
+                      name = "Parental \nTreatment") +
+  scale_fill_manual(values = c("control" = "cyan3", "treated" = "coral1"),
+                    name = "Parental \nTreatment") +
+  # Labels & theme
+  labs(title = "A", y = "AUC", x = "Temperature") +
+  # Significance label above last temperature
+  geom_text(data = data.frame(temperature = "40C", AUC = 9),
+            aes(x = temperature, y = AUC, label = "*"),
+            size = 8, inherit.aes = FALSE) +
+  geom_text(data = data.frame(temperature = "36C", AUC = 9),
+            aes(x = temperature, y = AUC, label = "*"),
+            size = 8, inherit.aes = FALSE) +
+  theme_classic(base_size = 16);plot5
+
+ggsave(plot5, filename="figures/resazurin/auc-temperatures.png", width=7, height=5)
+```
+

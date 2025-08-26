@@ -132,8 +132,8 @@ plot1 <-ggplot(growth, aes(x = age_days, y = length.mm, color = treatment, fill=
     color = "Parental \nTreatment",
     fill = "Parental \nTreatment"
   ) +
-  scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
-  scale_fill_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
+  scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1"), labels=c("control", "treated")) +
+  scale_fill_manual(values = c("control" = "cyan3", "treatment" = "coral1"), labels=c("control", "treated")) +
   geom_text(x=93, y=7, label="*", size=8, inherit.aes=FALSE)+
   geom_text(x=236, y=13.8, label="*", size=8, inherit.aes=FALSE)+
   theme_classic(base_size = 16);plot1
