@@ -1,0 +1,164 @@
+---
+title: PolyIC growth
+author: "Madeline Baird"
+date: '2025'
+output:
+  github_document: null
+  md_document: default
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 6
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# Set up work space and load packages 
+
+```{r}
+library(MASS) 
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(cowplot)
+library(lme4)
+library(lmerTest)
+library(car)
+library(effects)
+library(emmeans)
+library(readr)
+library(lubridate)
+```
+
+# load data 
+
+Load data and change date format
+
+```{r}
+growth <- read_csv("data/growth/growth.csv", 
+                   col_types = cols(oyster.id = col_number(), 
+                                    length.mm = col_number(), image.name = col_skip(), 
+                                    notes = col_skip()))
+
+head(growth)
+
+unique(levels(as.factor(growth$date)))
+
+growth<-growth%>%
+  mutate(age_days=if_else(date=="20241204", 59, 
+                          if_else(date=="20250107", 93, 
+                                  if_else(date=="20250206", 123, 
+                                          if_else(date=="20250530", 236, NA)))))
+
+unique(levels(as.factor(growth$age_days)))
+```
+
+# plot data 
+
+Plot raw data 
+
+```{r}
+ggplot(growth, aes(x = age_days, y = length.mm, color = treatment, group = treatment)) +
+  geom_smooth(method="lm")+
+  geom_point() +
+  labs(title = "Oyster Length Over Time",
+       x = "Date",
+       y = "Length (mm)") +
+  scale_color_manual(
+    values = c("control" = "cyan3", "treatment" = "coral1"),
+    name = "Parental \nTreatment")
+
+```
+
+Faceted Line Plot
+
+```{r}
+ggplot(growth, aes(x = age_days, y = length.mm, group = treatment, color = treatment)) +
+  geom_smooth(method="lm") +
+  geom_point() +
+  facet_wrap(~ treatment) +
+  labs(title = "Oyster Length Over Time by Treatment",
+       x = "Date",
+       y = "Length (mm)") +
+  scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
+  theme_minimal()
+
+```
+
+Mean + SE
+
+```{r}
+growth_summary <- growth %>%
+  group_by(age_days, treatment) %>%
+  summarise(mean_length = mean(length.mm, na.rm = TRUE),
+            se = sd(length.mm, na.rm = TRUE)/sqrt(n()), .groups = 'drop')
+
+# Summarize the data: mean and standard error per date and treatment
+growth_summary <- growth %>%
+  group_by(age_days, treatment) %>%
+  summarise(
+    mean_length = mean(length.mm, na.rm = TRUE),
+    se = sd(length.mm, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  );growth_summary
+
+# Plot
+ggplot(growth_summary, aes(x = age_days, y = mean_length, color = treatment, group = treatment)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_length - se, ymax = mean_length + se), width = 0.2) +
+  labs(
+    title = "Oyster Growth Over Time (Mean ± SE)",
+    x = "Date",
+    y = "Mean Shell Length (mm)",
+    color = "Parental \nTreatment"
+  ) +
+  scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
+  theme_minimal(base_size = 14)
+```
+
+Plot with linear trend lines 
+
+```{r}
+plot1 <-ggplot(growth, aes(x = age_days, y = length.mm, color = treatment, fill=treatment)) +
+  geom_point(position=position_jitterdodge(), alpha=0.3)+
+  geom_smooth(method = "lm", se = TRUE) +  # Linear model per treatment
+  labs(
+    title = "A",
+    x = "Age (Days)",
+    y = "Shell Length (mm)",
+    color = "Parental \nTreatment",
+    fill = "Parental \nTreatment"
+  ) +
+  scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
+  scale_fill_manual(values = c("control" = "cyan3", "treatment" = "coral1")) +
+  geom_text(x=93, y=7, label="*", size=8, inherit.aes=FALSE)+
+  geom_text(x=236, y=13.8, label="*", size=8, inherit.aes=FALSE)+
+  theme_classic(base_size = 16);plot1
+
+ggsave(plot1, filename="figures/growth/growth.png", width=6, height=5)
+
+```
+
+# model data 
+
+```{r}
+head(growth)
+
+model<-lm(length.mm ~ treatment * age_days, data=growth)
+summary(model)
+anova(model)
+```
+
+```{r}
+
+model<-lm(length.mm ~ treatment * as.factor(age_days), data=growth)
+summary(model)
+anova(model)
+
+emm<-emmeans(model, ~treatment|age_days)
+pairs(emm)
+```
+
