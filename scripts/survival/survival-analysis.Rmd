@@ -45,7 +45,7 @@ library(emmeans)
 ## Load data 
 
 ```{r}
-surv<-read_csv("data/survival/survival_assays.csv")%>%mutate(date=as.character(date))%>%select(!notes)#%>%
+surv <-read_csv("data/survival/survival_assays.csv")%>%mutate(date=as.character(date))%>%select(!notes)#%>%
  #filter(!date=="20250204")
 ```
 
