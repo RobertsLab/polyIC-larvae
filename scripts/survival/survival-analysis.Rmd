@@ -66,12 +66,15 @@ Analyze with binomial logistic regression for effects of temperature and spat tr
 1 = mortality 
 
 ```{r}
-surv<-surv%>%filter(!c(date=="20250312" & hours=="5"))
+surv<-surv%>%filter(!c(date=="20250312" & hours=="5")) #remove NAs from timepoint that wasn't recorded
 
 surv_model<-glmer(mortality ~ temperature * treatment * hours + (1|tank) + (1|treatment:tank) + (1|batch), family = binomial(link = "logit"), data=surv)
 
 summary(surv_model)
 Anova(surv_model)
+
+emm<-emmeans(surv_model, ~hours|temperature)
+pairs(emm)
 ```
 
 Generate predictive mortality. 
@@ -158,31 +161,50 @@ Significant effect of temperature and treatment on 14 h survival.
 Run posthoc test 
 
 ```{r}
-emm<-emmeans(surv_model, ~treatment|temperature)
+# Estimated marginal means (least-squares means)
+emm <- emmeans(surv_model, ~ treatment | temperature, type = "response")
+
+# Pairwise comparisons of treatments within each temperature
 pairs(emm)
+
+# Convert to a data frame for easier viewing
+emm_df <- as.data.frame(emm)
+emm_df
+
+# If you also want to compare temperatures within each treatment:
+emm_temp <- emmeans(surv_model, ~ temperature | treatment, type = "response")
+pairs(emm_temp)
 ```
 
 Mortality significantly higher in treated at 42C. Mortality significantly higher in control at 40C. Slight but not significant higher mortality in control at 45C.  
 
 ```{r}
-# Plot
-plot4<-surv%>%
-  filter(hours=="24")%>%
-  
-  ggplot(aes(x = temperature, y = predicted_mortality, color = treatment, fill = treatment, group=treatment)) + 
-  geom_point(aes(y = mortality), position=position_jitterdodge(jitter.width = 0.5, jitter.height = 0.03)) +
-geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
- scale_colour_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment") +
- scale_fill_manual(values=c("control"="cyan3", "treated"="coral1"), name="Parental \nTreatment") +
-  labs(
-    title = "",
-    y = "Probability of Mortality", x = "Temperature"
-  ) +
-  theme_classic() +
-   theme(axis.text.y = element_text(size = 17)) +
-  theme(axis.text.x = element_text(size = 17))+
- theme(axis.title.x = element_text(size = 17)) +
-   theme(axis.title.y = element_text(size = 17));plot4
+# Generate predictions across temperature and treatment from our model
+preds <- ggpredict(surv_model, terms = c("temperature [all]", "treatment"), type = "fixed")
+
+# Inspect predictions
+head(preds)
+
+# Plot model-based predictions + confidence intervals
+plot4 <- ggplot() +
+  # Raw mortality points, jittered for visibility
+  geom_point(data = surv %>% filter(hours=="24"),
+             aes(x = temperature, y = mortality, color = treatment),
+             position = position_jitter(width = 0.3, height = 0.03),
+             alpha = 0.6, size = 2) +
+  # Model-predicted lines
+  geom_line(data = preds, aes(x = x, y = predicted, color = group, group = group), linewidth = 2) +
+  # Manual colors
+  scale_colour_manual(values = c("control"="cyan3", "treated"="coral1"),
+                      name = "Parental \nTreatment") +
+  scale_fill_manual(values = c("control"="cyan3", "treated"="coral1"),
+                    name = "Parental \nTreatment") +
+  # Labels and theme
+  labs(y = "Model Predicted Mortality", x = "Temperature") +
+  # Manual significance text
+  geom_text(aes(x=6, y=0.65, label="*"), size=12, inherit.aes = FALSE) +
+  geom_text(aes(x=7, y=0.8, label="*"), size=12, inherit.aes = FALSE) +
+  theme_classic(base_size = 16); plot4
 
 ggsave(plot4, filename="figures/survival/mortality_temperature_24h.png", width=8, height=5)
 ```
