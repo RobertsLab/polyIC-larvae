@@ -1,0 +1,271 @@
+---
+title: "Sequim Bay oyster size analysis for PolyIC outplants"
+author: "AS Huffmyer"
+date: '2025'
+output:
+  github_document: default
+  github_md: default
+editor_options:
+  chunk_output_type: console
+---
+
+# Set up 
+
+Set up workspace, set options, and load required packages.    
+```{r}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Load libraries. 
+```{r}
+if ("tidyverse" %in% rownames(installed.packages()) == 'FALSE') install.packages('tidyverse') 
+if ("ggplot2" %in% rownames(installed.packages()) == 'FALSE') install.packages('ggplot2') 
+if ("ggeffects" %in% rownames(installed.packages()) == 'FALSE') install.packages('ggeffects') 
+
+library("ggplot2")
+library("tidyverse")
+library("lme4")
+library("lmerTest")
+library("emmeans")
+library("car")
+library("mgcv")
+library("ggeffects")
+library("cowplot")
+library("readxl")
+```
+
+# Load data 
+
+Read in data files. 
+```{r}
+data<-read_csv("data/outplant/sequim/size/oyster_measurements_polyic_sequim.csv")%>%
+  mutate(date=as.factor(date))
+```
+
+Set data attributes. 
+```{r}
+data$tag<-factor(data$tag)
+```
+
+Add in treatment information 
+```{r}
+metadata<-read_xlsx(path="data/outplant/sequim/outplant_metadata.xlsx")
+metadata$tag<-factor(metadata$outplant_tag)
+
+data$treatment<-metadata$treatment[match(data$tag, metadata$tag)]
+```
+
+# Plot data 
+
+Plot a histogram of each data column to identify any outliers. 
+```{r}
+hist(data$length.mm)
+hist(data$width.mm)
+```
+
+Remove upper outliers. 
+
+```{r}
+data<-data%>%
+  filter(length.mm<100)%>%
+  filter(width.mm<60)
+
+hist(data$length.mm)
+hist(data$width.mm)
+```
+
+Plot a box plot of length and width as a function of tag number, colored by treatment. 
+
+Plot length. 
+```{r}
+plot1<-data%>%
+  ggplot(aes(x=tag, y=length.mm, fill = treatment)) +
+  facet_wrap(~date)+
+  geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
+  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
+  xlab("Tag") + 
+  theme_classic(); plot1
+```
+
+Plot width. 
+```{r}
+plot2<-data%>%
+  ggplot(aes(x=tag, y=width.mm, fill = treatment)) +
+  facet_wrap(~date)+
+  geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
+  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
+  xlab("Tag") + 
+  theme_classic(); plot2
+```
+
+# Generate a metric of volume
+
+Use the equation to predict depth from length and width using growth data from Goose Point from the same source population. Use to calculate volume from length and width measured here.  
+
+Obtain training data with known length width and depth from 20240909 and 20251009 datasets. 
+```{r}
+training_data<-read_csv(file="https://raw.githubusercontent.com/RobertsLab/project-gigas-conditioning/refs/heads/main/data/outplanting/GoosePoint/growth_GoosePoint.csv")%>%
+  mutate(date=as.factor(date))%>%
+  filter(date %in% c("20240909", "20251009"))
+
+training_data$volume <- (4/3) * pi * (training_data$length.mm/2) * (training_data$width.mm/2) * (training_data$depth.mm/2)
+
+training_data<-training_data%>%
+  filter(!is.na(volume))
+
+hist(training_data$volume)
+```
+
+Fit a polynomial regression and a GAM model and compare the fits. 
+```{r}
+# Fit a polynomial regression model (2nd-degree polynomial)
+poly_model <- lm(volume ~ poly(length.mm, 2) + poly(width.mm, 2) + length.mm:width.mm, data = training_data)
+
+summary(poly_model)
+```
+
+Plot predicted vs actual volume from training data. 
+```{r}
+training_data$Predicted_Volume_Poly <- predict(poly_model, training_data)
+plot(training_data$Predicted_Volume_Poly ~ training_data$volume)
+```
+
+Predict volume for our test data set. 
+
+```{r}
+data$Predicted_Volume_Poly <- predict(poly_model, data)
+hist(data$Predicted_Volume_Poly)
+```
+
+Remove any observation that resulted in a negative value. 
+
+```{r}
+data<-data%>%filter(Predicted_Volume_Poly>0)
+hist(data$Predicted_Volume_Poly)
+```
+
+Proceed with the calculated volume data.  
+
+Remove upper outliers 
+```{r}
+data<-data%>%
+  filter(Predicted_Volume_Poly<60000)
+
+hist(data$Predicted_Volume_Poly)
+```
+
+
+# Analyze growth (volume) over time 
+
+## Plot data 
+
+```{r}
+plot4<-data%>%
+  ggplot(aes(x=tag, y=Predicted_Volume_Poly, fill = treatment)) +
+  facet_wrap(~date)+
+  geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
+  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
+  xlab("Bag") + 
+  scale_colour_manual(values=c("darkgray", "purple3"))+
+  scale_fill_manual(values=c("darkgray", "purple3"))+
+  theme_classic(); plot4
+```
+
+Plot summarized by treatment 
+
+```{r}
+plot5<-data%>%
+  ggplot(aes(x=date, y=Predicted_Volume_Poly, fill = treatment)) +
+  facet_wrap(~treatment)+
+  geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
+  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
+  xlab("Treatment") + 
+  theme_classic() +
+    scale_colour_manual(values=c("darkgray", "purple3"))+
+  scale_fill_manual(values=c("darkgray", "purple3"))+
+  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1)); plot5
+
+ggsave(plot5, filename="figures/outplant/sequim_sizes.png", width=6, height=4, units="in")
+```
+
+The larger oysters may have died resulting in smaller sizes in later dates. 
+
+Plot summarized by mean and standard error for each treatment.  
+
+```{r}
+plot6<-data%>%
+  group_by(treatment, date)%>%
+  summarise(mean=mean(Predicted_Volume_Poly, na.rm=TRUE), se=sd(Predicted_Volume_Poly, na.rm=TRUE)/sqrt(length(Predicted_Volume_Poly)))%>%
+  
+  ggplot(aes(x=date, y=mean, fill = treatment)) +
+  facet_wrap(~treatment)+
+  geom_point(pch = 21) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=0)+
+  xlab("Bag") + 
+  ylab("Volume")+
+  #ylim(2000, 15000)+
+  theme_classic() + 
+  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1)); plot6
+```
+
+Treated oysters appear to have maintained size more than control - perhaps fewer of the large oysters died?   
+
+## Run linear mixed models models 
+
+```{r}
+model<-lmer(sqrt(Predicted_Volume_Poly) ~ treatment*date + (1|tag:treatment), data=data)
+
+summary(model)
+anova(model)
+
+qqPlot(residuals(model))
+hist(residuals(model))
+```
+
+Only change by date, no treatment effects. 
+
+There might be several outliers. Conduct outlier removal and analyze again.  
+
+```{r}
+# Extract raw residuals
+data$raw_resid <- residuals(model)
+
+# Standardize residuals
+data$std_resid <- data$raw_resid / sd(data$raw_resid)
+
+# Flag potential outliers
+outlier_threshold <- 3
+data$outlier_flag <- abs(data$std_resid) > outlier_threshold
+
+# Filter rows flagged as outliers
+outliers <- data %>% filter(outlier_flag == TRUE)
+print(outliers)
+
+# Plot standardized residuals
+ggplot(data, aes(x = seq_along(std_resid), y = std_resid)) +
+  geom_point(aes(color = outlier_flag), size = 2) +
+  geom_hline(yintercept = c(-outlier_threshold, outlier_threshold), linetype = "dashed", color = "red") +
+  labs(title = "Standardized Residuals with Outliers", x = "Index", y = "Standardized Residual") +
+  theme_minimal()
+```
+No outliers. 
+
+Remove identified outliers. 
+```{r}
+data<-data%>%
+  filter(!outlier_flag==TRUE)
+```
+
+Analyze again. 
+
+```{r}
+model<-lmer(sqrt(Predicted_Volume_Poly) ~ treatment*date + (1|tag:treatment), data=data)
+
+summary(model)
+anova(model)
+
+qqPlot(residuals(model))
+hist(residuals(model))
+```
+
+Only an effect of date, no effect of treatment. 
