@@ -659,3 +659,13 @@ plot5 <- ggplot() +
 ggsave(plot5, filename="figures/resazurin/auc-temperatures.png", width=7, height=5)
 ```
 
+Calculate percent difference. 
+
+```{r}
+auc_data%>%
+  group_by(temperature, spat_treatment)%>%
+  summarise(mean=mean(AUC, na.rm=TRUE))%>%
+  pivot_wider(names_from = spat_treatment, values_from = mean)%>%
+  mutate(perc_diff=(control-treated)/control*100)
+```
+
