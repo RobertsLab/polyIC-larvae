@@ -1,0 +1,56 @@
+---
+title: "Hatchery measurements of larval rearing"
+author: "Ariana S Huffmyer"
+date: "2025"
+output: 
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+This script reads and plots environmental data from Hobo loggers. 
+
+# Set Up    
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(purrr)
+library(lubridate)
+library(ggplot2)
+library(seacarb)
+library(broom)
+library(cowplot)
+```
+
+# Data 
+
+```{r}
+data<-read_excel("data/environmental/daily-measurements.xlsx")%>%mutate(pH.nbs=as.numeric(pH.nbs))%>%mutate(sal.psu=as.numeric(sal.psu))
+
+str(data)
+```
+
+# Summarize data in a table 
+
+```{r}
+data%>%
+  group_by(period)%>%
+  summarise(mean_temp=mean(temp.C, na.rm=TRUE), 
+            sd_temp=sd(temp.C, na.rm=TRUE), 
+            mean_pH=mean(pH.nbs, na.rm=TRUE), 
+            sd_pH=sd(pH.nbs, na.rm=TRUE), 
+            mean_sal=mean(sal.psu, na.rm=TRUE), 
+            sd_sal=sd(sal.psu, na.rm=TRUE)
+            )
+```
+
