@@ -598,7 +598,7 @@ plot5<-ggplot(auc_data, aes(x = temperature, y = AUC, color = spat_treatment, fi
 Analyze effect of temperature on AUC. 
 
 ```{r}
-tpc_model<-lmer(log(1+AUC) ~ temperature * spat_treatment + (1|holding_tank), data=auc_data)
+tpc_model<-lmer(log(1+AUC) ~ temperature * spat_treatment + (1|holding_tank)+ (1|plate:date), data=auc_data)
 
 summary(tpc_model)
 anova(tpc_model)
