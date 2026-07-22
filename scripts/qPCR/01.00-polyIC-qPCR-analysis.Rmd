@@ -20,6 +20,8 @@ output:
     number_sections: true
     code_folding: show
     code_download: true
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup}
@@ -28,7 +30,7 @@ output:
 #| results: hold
 
 # Set output directory
-output_dir <- "../../output/qPCR/01.00-polyIC-qPCR-analysis"
+output_dir <- "output/qPCR/01.00-polyIC-qPCR-analysis"
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 knitr::opts_chunk$set(
@@ -2269,3 +2271,15 @@ if(nrow(cld_annotations) > 0) {
 
 print(p)
 ```
+
+Check sample size. 
+```{r}
+sample_sizes <- delta_Cq_df %>%
+  filter(!stress_type=="Mechanical")%>%
+  group_by(Target, stress_type, polyIC) %>%
+  summarise(
+    n = sum(!is.na(delta_Cq)),
+    .groups = "drop"
+  );sample_sizes
+```
+
