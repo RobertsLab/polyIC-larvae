@@ -18,7 +18,6 @@ This script analyzes survival assays for the PolyIC seed project.
 
 Before running, click the arrow next to "knit" on the toolbar and select "project directory"
 
-
 # Set up 
 
 Set up workspace, set options, and load required packages.    
@@ -153,7 +152,16 @@ surv_model<-surv%>%
   glmer(mortality ~ temperature * treatment + (1|tank) + (1|treatment:tank) + (1|batch), family = binomial(link = "logit"), data=.)
 
 summary(surv_model)
-Anova(surv_model)
+Anova(surv_model, type = "II")
+
+#check for overdispersion
+library(DHARMa)
+
+sim <- simulateResiduals(surv_model)
+testDispersion(sim)
+
+# test zero inflation
+testZeroInflation(sim)
 ```
 
 Significant effect of temperature and treatment on 14 h survival. 

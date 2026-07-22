@@ -288,7 +288,7 @@ full_data%>%
 model<-lmer(value.mm ~ timepoint * temperature * spat_treatment + (1|date:plate:well) + (1|holding_tank) + (1|spat_treatment:tank), data=full_data)
 
 summary(model)
-anova(model)
+car::Anova(model, type="II")
 #rand(model)
 
 qqPlot(residuals(model))
@@ -601,8 +601,11 @@ Analyze effect of temperature on AUC.
 tpc_model<-lmer(log(1+AUC) ~ temperature * spat_treatment + (1|holding_tank)+ (1|plate:date) + (1|date), data=auc_data)
 
 summary(tpc_model)
-anova(tpc_model)
+anova(tpc_model, type="II")
 qqPlot(residuals(tpc_model))
+
+plot(tpc_model, which = 1)   # Residuals vs fitted
+plot(tpc_model, which = 3)   # Scale-Location plot
 ```
 
 Temperature x treatment is significant 
