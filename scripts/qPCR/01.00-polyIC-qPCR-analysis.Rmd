@@ -2272,6 +2272,76 @@ if(nrow(cld_annotations) > 0) {
 print(p)
 ```
 
+Visualize for only temperature and control. 
+
+Visualize delta Cq values by treatment group for each target.
+
+```{r anova-summary-plots-subset}
+# Filter out Mechanical treatment
+plot_df <- delta_Cq_df %>%
+  filter(stress_type != "Mechanical")
+
+# Filter CLD annotations
+cld_plot <- cld_annotations %>%
+  filter(stress_type != "Mechanical")
+
+# Filter out Mechanical treatment
+plot_df <- delta_Cq_df %>%
+  filter(stress_type != "Mechanical")
+
+# Filter CLD annotations (keeps previously calculated y_pos)
+cld_plot <- cld_annotations %>%
+  filter(stress_type != "Mechanical")
+
+# Create plot
+p <- plot_df %>%
+  ggplot(aes(x = stress_type, y = delta_Cq, fill = polyIC)) +
+  geom_boxplot(position = position_dodge(0.8), alpha = 0.7) +
+  geom_point(position = position_dodge(0.8), alpha = 0.5, size = 1) +
+  facet_wrap(~Target, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = c("No_PolyIC" = "darkgray",
+                               "PolyIC" = "salmon")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  theme_bw() +
+  labs(
+    title = "Delta Cq by Treatment Group with ANOVA Significance",
+    x = "Stress Type",
+    y = "Delta Cq",
+    fill = "PolyIC Treatment"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+# Add CLD annotations
+if(nrow(cld_plot) > 0) {
+
+  p <- p +
+    geom_text(
+      data = cld_plot,
+      aes(
+        x = stress_type,
+        y = y_pos,
+        label = label,
+        group = polyIC
+      ),
+      position = position_dodge(0.8),
+      size = 4,
+      vjust = 0,
+      color = "darkorange",
+      fontface = "bold"
+    ) +
+    labs(
+      subtitle = "Letters show statistical groupings (p ≤ 0.05). Groups sharing a letter are NOT significantly different.",
+      caption = "Compact Letter Display shown for: ATP Synthase, HSP70, HSP90, and VIPERIN."
+    )
+}
+
+print(p)
+```
+
 Check sample size. 
 ```{r}
 sample_sizes <- delta_Cq_df %>%
