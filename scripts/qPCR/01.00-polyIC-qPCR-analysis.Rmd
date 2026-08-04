@@ -301,6 +301,7 @@ grouped_df %>%
   knitr::kable()
 ```
 
+
 # Calculate Delta Cq
 
 ```{r calculate-delta-cq}
@@ -2353,3 +2354,313 @@ sample_sizes <- delta_Cq_df %>%
   );sample_sizes
 ```
 
+# Statistical analysis for temperature comparisons only for PolyIC vs Control 
+
+```{r}
+data <- delta_Cq_df %>%
+  filter(!stress_type=="Mechanical")
+```
+
+```{r}
+sample_sizes <- data %>%
+  group_by(Target, stress_type, polyIC) %>%
+  summarise(
+    n = sum(!is.na(delta_Cq)),
+    .groups = "drop"
+  );sample_sizes
+```
+
+## ATP Synthase 
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot1<-data%>%
+  filter(Target=="ATP.Synthase")%>%
+  
+    ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot1
+
+data%>%
+  filter(Target=="ATP.Synthase")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="ATP.Synthase")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Does not meet assumptions. 
+
+
+## Citrate Synthase 
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot2<-data%>%
+  filter(Target=="Citrate.Synthase")%>%
+  
+    ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot2
+
+data%>%
+  filter(Target=="Citrate.Synthase")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="Citrate.Synthase")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Does not meet assumptions. 
+
+## DNMT1 
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot3<-data%>%
+  filter(Target=="DNMT1")%>%
+  
+    ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot3
+
+data%>%
+  filter(Target=="DNMT1")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="DNMT1")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Meets assumptions. No differences. 
+
+## HSP70
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot4<-data%>%
+  filter(Target=="HSP70")%>%
+  
+    ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot4
+
+data%>%
+  filter(Target=="HSP70")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="HSP70")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Meets assumptions. Difference between PolyIC treatments and lower at elevated temperature, no interactive effects. 
+
+## HSP90
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot5<-data%>%
+  filter(Target=="HSP90")%>%
+  
+  ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot5
+
+data%>%
+  filter(Target=="HSP90")%>%
+  
+  ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="HSP90")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Meets assumptions. Difference between PolyIC treatments. 
+
+## VIPERIN
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot6<-data%>%
+  filter(Target=="VIPERIN")%>%
+  
+    ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot6
+
+data%>%
+  filter(Target=="VIPERIN")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="VIPERIN")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Meets assumptions. Difference between PolyIC treatments. 
+
+## cGAS
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+plot7<-data%>%
+  filter(Target=="cGAS")%>%
+  
+    ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+
+plot7
+
+data%>%
+  filter(Target=="cGAS")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="cGAS")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+Meets assumptions. No effect.  
