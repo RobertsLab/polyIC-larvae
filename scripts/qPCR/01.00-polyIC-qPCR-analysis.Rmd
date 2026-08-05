@@ -2531,6 +2531,9 @@ model<-data%>%
 
 summary(model)
 
+emm<-emmeans(model, ~ polyIC | stress_type)
+pairs(emm)
+
 qqPlot(model$residuals)
 plot(model, 1)
 plot(model, 3)
@@ -2573,6 +2576,9 @@ model<-data%>%
 
 summary(model)
 
+emm<-emmeans(model, ~ polyIC | stress_type)
+pairs(emm)
+
 qqPlot(model$residuals)
 plot(model, 1)
 plot(model, 3)
@@ -2614,6 +2620,9 @@ model<-data%>%
   aov(delta_Cq~polyIC*stress_type, data=.)
 
 summary(model)
+
+emm<-emmeans(model, ~ polyIC | stress_type)
+pairs(emm)
 
 qqPlot(model$residuals)
 plot(model, 1)
@@ -2663,4 +2672,534 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions. No effect.  
+Meets assumptions. No effect. 
+
+# Downsampling Robustness Analysis
+
+## Rationale
+
+HSP70, HSP90, and VIPERIN showed statistically significant differences between PolyIC treatments in the ANOVAs above. However, the PolyIC_Control group has unequal sample sizes compared to other groups (HSP70: n=18; HSP90 and VIPERIN: n=8) because a subset of samples were never run on those qPCR plates. To verify that these significant results are not an artifact of unequal sample sizes — and would hold even with balanced, reduced data — we perform a randomized downsampling analysis.
+
+**Approach:** For each gene, we identify the minimum sample size present in any treatment group. We then randomly subsample that number of observations from every group, run the two-way ANOVA (`delta_Cq ~ polyIC * stress_type`), and record the p-values for each model term. This is repeated 1,000 times. The proportion of iterations yielding p < 0.05 for each term indicates whether the significance is robust to sample size reduction.
+
+```{r downsample-setup}
+#| hold: true
+#| results: hold
+#| label: downsample-setup
+
+set.seed(42)
+n_iter <- 1000
+genes_to_test <- c("HSP70", "HSP90", "VIPERIN")
+
+# Run downsampling for a single gene and return a data frame of p-values
+run_downsampling <- function(gene_name, df, n_iterations = 1000) {
+  
+  gene_data <- df %>%
+    filter(Target == gene_name)
+  
+  # Identify group sample sizes
+  group_sizes <- gene_data %>%
+    group_by(polyIC, stress_type) %>%
+    summarise(n = n(), .groups = "drop")
+  
+  min_n <- min(group_sizes$n)
+  
+  cat("Gene:", gene_name, "\n")
+  cat("  Group sizes before downsampling:\n")
+  print(as.data.frame(group_sizes))
+  cat("  Downsampling all groups to n =", min_n, "per group\n\n")
+  
+  # Run iterations
+  results <- map_df(1:n_iterations, function(i) {
+    
+    # Downsample each group to min_n
+    downsampled <- gene_data %>%
+      group_by(polyIC, stress_type) %>%
+      slice_sample(n = min_n) %>%
+      ungroup()
+    
+    # Fit ANOVA
+    model <- tryCatch(
+      aov(delta_Cq ~ polyIC * stress_type, data = downsampled),
+      error = function(e) NULL
+    )
+    
+    if (is.null(model)) {
+      return(data.frame(
+        iter        = i,
+        p_polyIC    = NA_real_,
+        p_stress    = NA_real_,
+        p_interact  = NA_real_
+      ))
+    }
+    
+    s <- summary(model)[[1]]
+    rownames(s) <- trimws(rownames(s))
+    
+    data.frame(
+      iter       = i,
+      p_polyIC   = s["polyIC",          "Pr(>F)"],
+      p_stress   = s["stress_type",     "Pr(>F)"],
+      p_interact = s["polyIC:stress_type", "Pr(>F)"]
+    )
+  })
+  
+  results$gene   <- gene_name
+  results$min_n  <- min_n
+  results
+}
+
+# Run for all three genes
+downsample_results <- map_df(genes_to_test, ~run_downsampling(.x, data, n_iter))
+```
+
+## Proportion of Significant Results Across Iterations
+
+```{r downsample-summary}
+#| hold: true
+#| results: hold
+#| label: downsample-summary
+
+sig_summary <- downsample_results %>%
+  group_by(gene, min_n) %>%
+  summarise(
+    n_valid_iters         = sum(!is.na(p_polyIC)),
+    pct_sig_polyIC        = round(mean(p_polyIC    < 0.05, na.rm = TRUE) * 100, 1),
+    pct_sig_stress        = round(mean(p_stress    < 0.05, na.rm = TRUE) * 100, 1),
+    pct_sig_interaction   = round(mean(p_interact  < 0.05, na.rm = TRUE) * 100, 1),
+    median_p_polyIC       = round(median(p_polyIC,   na.rm = TRUE), 4),
+    median_p_stress       = round(median(p_stress,   na.rm = TRUE), 4),
+    median_p_interaction  = round(median(p_interact, na.rm = TRUE), 4),
+    .groups = "drop"
+  )
+
+cat("=== DOWNSAMPLING ROBUSTNESS SUMMARY ===\n")
+cat("(", n_iter, "iterations per gene; all groups downsampled to min n per gene)\n\n", sep = "")
+cat("% of iterations where p < 0.05 (and median p-value):\n\n")
+
+for (i in seq_len(nrow(sig_summary))) {
+  g <- sig_summary$gene[i]
+  n <- sig_summary$min_n[i]
+  cat("--- ", g, " (downsampled to n = ", n, " per group) ---\n", sep = "")
+  cat("  polyIC effect:        ", sig_summary$pct_sig_polyIC[i],
+      "% significant  (median p = ", sig_summary$median_p_polyIC[i], ")\n", sep = "")
+  cat("  stress_type effect:   ", sig_summary$pct_sig_stress[i],
+      "% significant  (median p = ", sig_summary$median_p_stress[i], ")\n", sep = "")
+  cat("  polyIC × stress:      ", sig_summary$pct_sig_interaction[i],
+      "% significant  (median p = ", sig_summary$median_p_interaction[i], ")\n\n", sep = "")
+}
+
+# Interpretation
+cat("=== INTERPRETATION ===\n\n")
+for (i in seq_len(nrow(sig_summary))) {
+  g <- sig_summary$gene[i]
+  n <- sig_summary$min_n[i]
+  cat(g, " (n = ", n, " per group):\n", sep = "")
+  
+  for (term in c("polyIC", "stress_type", "interaction")) {
+    col  <- paste0("pct_sig_", ifelse(term == "stress_type", "stress",
+                                       ifelse(term == "interaction", "interaction", "polyIC")))
+    pct  <- sig_summary[[col]][i]
+    verdict <- if (pct >= 80) {
+      "ROBUST — significant in >= 80% of downsampled iterations; sample size is not driving this result."
+    } else if (pct >= 50) {
+      "MODERATE — significant in 50-79% of iterations; interpret with caution."
+    } else {
+      "NOT ROBUST — significant in < 50% of iterations; result may be sensitive to sample size."
+    }
+    cat("  ", term, ": ", pct, "% — ", verdict, "\n", sep = "")
+  }
+  cat("\n")
+}
+```
+
+## P-value Distribution Plots
+
+Histograms of p-values across all 1,000 downsampled iterations for each term. A distribution heavily skewed toward 0 confirms a robust effect; a uniform distribution indicates no real effect.
+
+```{r downsample-pvalue-plots}
+#| hold: true
+#| label: downsample-pvalue-plots
+#| fig.width: 12
+#| fig.height: 10
+
+# Reshape to long format for faceting
+downsample_long <- downsample_results %>%
+  pivot_longer(
+    cols      = c(p_polyIC, p_stress, p_interact),
+    names_to  = "term",
+    values_to = "p_value"
+  ) %>%
+  mutate(
+    term = recode(term,
+      p_polyIC   = "PolyIC effect",
+      p_stress   = "Stress type effect",
+      p_interact = "PolyIC × Stress interaction"
+    )
+  )
+
+# Add % significant annotation per facet
+sig_labels <- downsample_long %>%
+  group_by(gene, term) %>%
+  summarise(
+    pct_sig = paste0(round(mean(p_value < 0.05, na.rm = TRUE) * 100, 1), "% p<0.05"),
+    .groups = "drop"
+  )
+
+ggplot(downsample_long, aes(x = p_value)) +
+  geom_histogram(binwidth = 0.05, boundary = 0,
+                 fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(xintercept = 0.05, color = "red", linetype = "dashed", linewidth = 0.8) +
+  geom_text(
+    data  = sig_labels,
+    aes(x = 0.75, y = Inf, label = pct_sig),
+    vjust = 1.5, size = 3.2, color = "red", fontface = "bold"
+  ) +
+  facet_grid(gene ~ term, scales = "free_y") +
+  scale_x_continuous(limits = c(0, 1), breaks = c(0, 0.05, 0.25, 0.5, 0.75, 1)) +
+  theme_bw() +
+  labs(
+    title    = "P-value Distribution Across 1,000 Downsampled Iterations",
+    subtitle = paste0("Red dashed line = p = 0.05 threshold. All groups downsampled to minimum n per gene.\n",
+                      "HSP70 downsampled to n=18; HSP90 and VIPERIN downsampled to n=8."),
+    x        = "p-value",
+    y        = "Count (of 1,000 iterations)"
+  ) +
+  theme(strip.text = element_text(size = 9))
+```
+
+## Median P-value Comparison: Full vs. Downsampled Data
+
+```{r downsample-vs-full}
+#| hold: true
+#| results: hold
+#| label: downsample-vs-full
+
+cat("=== FULL DATA vs. DOWNSAMPLED MEDIAN p-VALUES ===\n\n")
+
+for (g in genes_to_test) {
+  
+  # Full-data ANOVA p-values
+  full_model <- data %>%
+    filter(Target == g) %>%
+    aov(delta_Cq ~ polyIC * stress_type, data = .)
+  
+  s_full <- summary(full_model)[[1]]
+  rownames(s_full) <- trimws(rownames(s_full))
+  
+  # Downsampled median p-values
+  ds_gene <- downsample_results %>% filter(gene == g)
+  n_ds    <- unique(ds_gene$min_n)
+  
+  cat("--- ", g, " ---\n", sep = "")
+  cat(sprintf("  %-28s %12s %20s\n", "Term", "Full data p", 
+              paste0("Downsampled median p (n=", n_ds, ")")))
+  cat(sprintf("  %-28s %12s %20s\n",
+              "polyIC effect",
+              formatC(s_full["polyIC",             "Pr(>F)"], format = "f", digits = 4),
+              formatC(median(ds_gene$p_polyIC,   na.rm = TRUE), format = "f", digits = 4)))
+  cat(sprintf("  %-28s %12s %20s\n",
+              "stress_type effect",
+              formatC(s_full["stress_type",        "Pr(>F)"], format = "f", digits = 4),
+              formatC(median(ds_gene$p_stress,    na.rm = TRUE), format = "f", digits = 4)))
+  cat(sprintf("  %-28s %12s %20s\n",
+              "polyIC × stress interaction",
+              formatC(s_full["polyIC:stress_type", "Pr(>F)"], format = "f", digits = 4),
+              formatC(median(ds_gene$p_interact,  na.rm = TRUE), format = "f", digits = 4)))
+  cat("\n")
+}
+```
+
+# Fold Change Figures: PolyIC vs No_PolyIC at Control and High Temperature
+
+Visualize per-sample delta-delta Cq and fold change relative to the No_PolyIC Control group mean. Each point represents one biological replicate sample. The reference group (No_PolyIC_Control) anchors at delta-delta Cq = 0 / fold change = 1. Individual points are shown alongside group mean ± SE to convey both biological variability and the central tendency.
+
+```{r ddcq-per-sample-calculate}
+#| hold: true
+#| results: hold
+#| label: ddcq-per-sample-calculate
+
+# Reference: mean delta_Cq of No_PolyIC_Control for each gene
+ref_means <- data %>%
+  filter(polyIC == "No_PolyIC", stress_type == "Control") %>%
+  group_by(Target) %>%
+  summarise(ref_delta_Cq = mean(delta_Cq, na.rm = TRUE), .groups = "drop")
+
+# Per-sample delta-delta Cq and fold change
+ddCq_per_sample <- data %>%
+  left_join(ref_means, by = "Target") %>%
+  mutate(
+    delta_delta_Cq   = delta_Cq - ref_delta_Cq,
+    fold_change      = 2^(-delta_delta_Cq),
+    log2_fold_change = -delta_delta_Cq        # log2(FC) = -ddCq
+  )
+
+# Group summary (mean ± SE) for overlay
+ddCq_summary <- ddCq_per_sample %>%
+  group_by(Target, polyIC, stress_type) %>%
+  summarise(
+    mean_ddCq = mean(delta_delta_Cq,   na.rm = TRUE),
+    se_ddCq   = sd(delta_delta_Cq,     na.rm = TRUE) /
+                  sqrt(sum(!is.na(delta_delta_Cq))),
+    mean_log2fc = mean(log2_fold_change, na.rm = TRUE),
+    se_log2fc   = sd(log2_fold_change,   na.rm = TRUE) /
+                    sqrt(sum(!is.na(log2_fold_change))),
+    n = sum(!is.na(delta_delta_Cq)),
+    .groups = "drop"
+  )
+
+# Treatment label ordering for consistent x-axis
+ddCq_per_sample <- ddCq_per_sample %>%
+  mutate(
+    stress_type = factor(stress_type, levels = c("Control", "Temperature")),
+    polyIC      = factor(polyIC,      levels = c("No_PolyIC", "PolyIC"))
+  )
+
+ddCq_summary <- ddCq_summary %>%
+  mutate(
+    stress_type = factor(stress_type, levels = c("Control", "Temperature")),
+    polyIC      = factor(polyIC,      levels = c("No_PolyIC", "PolyIC"))
+  )
+
+cat("Per-sample delta-delta Cq calculated for", n_distinct(ddCq_per_sample$Sample),
+    "samples across", n_distinct(ddCq_per_sample$Target), "genes.\n")
+cat("Reference group: No_PolyIC_Control (delta-delta Cq = 0 / fold change = 1)\n")
+```
+
+## Delta-Delta Cq: Individual Replicates
+
+Delta-delta Cq values per sample, relative to the No_PolyIC_Control group mean. Negative values indicate lower Cq (higher expression) relative to the reference; positive values indicate higher Cq (lower expression). Points are individual biological replicates; diamonds show group mean ± SE.
+
+```{r plot-ddcq-individual}
+#| hold: true
+#| label: plot-ddcq-individual
+#| fig.width: 12
+#| fig.height: 7
+
+dodge_width <- 0.55
+
+ggplot() +
+  # Individual replicate points
+  geom_point(
+    data     = ddCq_per_sample,
+    aes(x    = stress_type,
+        y    = delta_delta_Cq,
+        color = polyIC,
+        shape = bio_replicate),
+    position = position_jitterdodge(jitter.width = 0.12,
+                                    dodge.width  = dodge_width),
+    size  = 2.2,
+    alpha = 0.75
+  ) +
+  # Mean ± SE error bars
+  geom_errorbar(
+    data     = ddCq_summary,
+    aes(x    = stress_type,
+        ymin = mean_ddCq - se_ddCq,
+        ymax = mean_ddCq + se_ddCq,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    width    = 0.18,
+    linewidth = 0.8
+  ) +
+  # Group mean as a diamond
+  geom_point(
+    data     = ddCq_summary,
+    aes(x    = stress_type,
+        y    = mean_ddCq,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    shape    = 18,   # filled diamond
+    size     = 4
+  ) +
+  # Reference line at 0 (= No_PolyIC_Control level)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.4) +
+  facet_wrap(~Target, scales = "free_y", nrow = 2) +
+  scale_color_manual(
+    values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon"),
+    labels = c("No_PolyIC" = "No PolyIC", "PolyIC" = "PolyIC")
+  ) +
+  scale_shape_manual(
+    values = c("A" = 16, "B" = 17, "C" = 15, "D" = 3),
+    name   = "Biological replicate"
+  ) +
+  theme_classic() +
+  labs(
+    title    = "Delta-Delta Cq Relative to No PolyIC Control",
+    subtitle = "Dashed line = reference level (No PolyIC Control). Points = individual replicates; diamonds = mean ± SE.",
+    x        = "Stress Treatment",
+    y        = "Delta-Delta Cq",
+    color    = "PolyIC Treatment"
+  ) +
+  theme(
+    legend.position = "right",
+    strip.text      = element_text(face = "bold")
+  )
+```
+
+## Fold Change: Individual Replicates (log2 scale)
+
+Fold change relative to No_PolyIC_Control, plotted on a log2 scale so up- and down-regulation appear symmetrical. A log2 fold change of 1 = 2-fold upregulation; -1 = 2-fold downregulation. Points are individual biological replicates; diamonds show group mean ± SE.
+
+```{r plot-foldchange-individual}
+#| hold: true
+#| label: plot-foldchange-individual
+#| fig.width: 12
+#| fig.height: 7
+genes_plot <- c("HSP70", "HSP90", "VIPERIN")
+
+# Add panel labels to gene names for facet titles
+ddCq_per_sample_labeled <- ddCq_per_sample %>%
+  filter(Target %in% genes_plot) %>%
+  mutate(Target = factor(Target,
+                         levels = c("HSP70", "HSP90", "VIPERIN"),
+                         labels = c("A. HSP70", "B. HSP90", "C. VIPERIN")))
+
+ddCq_summary_labeled <- ddCq_summary %>%
+  filter(Target %in% genes_plot) %>%
+  mutate(Target = factor(Target,
+                         levels = c("HSP70", "HSP90", "VIPERIN"),
+                         labels = c("A. HSP70", "B. HSP90", "C. VIPERIN")))
+
+sig_annotations <- ddCq_per_sample %>%
+  filter(Target %in% genes_plot) %>%
+  group_by(Target, stress_type) %>%
+  summarise(y_max = max(log2_fold_change, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Target) %>%
+  mutate(
+    gene_range = max(y_max) - min(y_max),
+    y_pos      = y_max + gene_range * 0.12 + 0.15
+  ) %>%
+  ungroup() %>%
+  mutate(Target = factor(Target,
+                         levels = c("HSP70", "HSP90", "VIPERIN"),
+                         labels = c("A. HSP70", "B. HSP90", "C. VIPERIN")))
+
+plot_fc <- ggplot() +
+  geom_point(
+    data     = ddCq_per_sample_labeled,
+    aes(x    = stress_type,
+        y    = log2_fold_change,
+        color = polyIC),
+    position = position_jitterdodge(jitter.width = 0.12,
+                                    dodge.width  = dodge_width),
+    size  = 2.2,
+    alpha = 0.3
+  ) +
+  geom_errorbar(
+    data     = ddCq_summary_labeled,
+    aes(x    = stress_type,
+        ymin = mean_log2fc - se_log2fc,
+        ymax = mean_log2fc + se_log2fc,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    width    = 0.18,
+    linewidth = 0.8
+  ) +
+  geom_point(
+    data     = ddCq_summary_labeled,
+    aes(x    = stress_type,
+        y    = mean_log2fc,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    shape    = 18,
+    size     = 4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.8) +
+  geom_text(
+    data  = sig_annotations,
+    aes(x = stress_type, y = y_pos),
+    label = "*",
+    size  = 6,
+    color = "black"
+  ) +
+  facet_wrap(~Target, scales = "free_y", nrow = 1) +
+  scale_color_manual(
+    values = c("No_PolyIC" = "turquoise", "PolyIC" = "salmon"),
+    labels = c("No_PolyIC" = "PolyIC Control", "PolyIC" = "PolyIC Treated")
+  ) +
+  scale_x_discrete(
+    labels = c("Control" = "Control 10°C", "Temperature" = "High 44°C")
+  ) +
+  theme_classic() +
+  labs(
+    x     = "Acute Stress Treatment",
+    y     = "Log2 Fold Change",
+    color = "Poly(I:C) Treatment"
+  ) +
+  theme(
+    legend.position = "right",
+    strip.text      = element_text(face = "bold")
+  ); plot_fc
+
+ggsave(plot_fc, filename = "figures/qPCR/fc_genes.png", width = 10, height = 4)
+```
+
+## Fold Change Summary Table
+
+```{r foldchange-summary-table}
+#| hold: true
+#| results: hold
+#| label: foldchange-summary-table
+
+ddCq_summary %>%
+  filter(Target %in% genes_plot)%>%
+  mutate(
+    mean_FC   = round(2^mean_log2fc, 3),
+    se_FC     = round(se_log2fc * log(2) * 2^mean_log2fc, 3),  # delta method SE on FC scale
+    mean_log2fc = round(mean_log2fc, 3),
+    se_log2fc   = round(se_log2fc,   3)
+  ) %>%
+  dplyr::select(Target, polyIC, stress_type, n,
+                mean_log2fc, se_log2fc,
+                mean_FC, se_FC) %>%
+  arrange(Target, stress_type, polyIC) %>%
+  knitr::kable(
+    col.names = c("Gene", "PolyIC", "Stress", "n",
+                  "Mean log2 FC", "SE log2 FC",
+                  "Mean FC", "SE FC"),
+    caption   = "Fold change relative to No_PolyIC_Control group mean. FC = 2^(log2 FC)."
+  )
+```
+
+# Calculate effect sizes
+
+```{r}
+# Cohen's d effect sizes for polyIC effect per gene and stress type
+effect_sizes <- data %>%
+  filter(Target %in% genes_plot) %>%
+  group_by(Target, stress_type) %>%
+  summarise(
+    mean_polyIC   = mean(delta_Cq[polyIC == "PolyIC"],    na.rm = TRUE),
+    mean_noPolyIC = mean(delta_Cq[polyIC == "No_PolyIC"], na.rm = TRUE),
+    sd_polyIC     = sd(delta_Cq[polyIC == "PolyIC"],      na.rm = TRUE),
+    sd_noPolyIC   = sd(delta_Cq[polyIC == "No_PolyIC"],   na.rm = TRUE),
+    n_polyIC      = sum(!is.na(delta_Cq[polyIC == "PolyIC"])),
+    n_noPolyIC    = sum(!is.na(delta_Cq[polyIC == "No_PolyIC"])),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pooled_sd = sqrt(
+      ((n_polyIC - 1) * sd_polyIC^2 + (n_noPolyIC - 1) * sd_noPolyIC^2) /
+      (n_polyIC + n_noPolyIC - 2)
+    ),
+    cohens_d  = (mean_polyIC - mean_noPolyIC) / pooled_sd
+  )
+
+knitr::kable(
+  effect_sizes %>%
+    dplyr::select(Target, stress_type, n_polyIC, n_noPolyIC, cohens_d) %>%
+    mutate(
+      cohens_d    = round(cohens_d, 3),
+      magnitude   = case_when(
+        abs(cohens_d) >= 0.8 ~ "large",
+        abs(cohens_d) >= 0.5 ~ "medium",
+        abs(cohens_d) >= 0.2 ~ "small",
+        TRUE                 ~ "negligible"
+      )
+    ),
+  col.names = c("Gene", "Stress", "n PolyIC", "n No PolyIC", "Cohen's d", "Magnitude"),
+  caption   = "Cohen's d effect sizes for Poly(I:C) effect on ΔCq. Positive d = higher ΔCq (lower expression) in PolyIC group."
+)
+```
+
