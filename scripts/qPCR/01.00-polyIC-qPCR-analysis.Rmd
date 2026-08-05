@@ -2831,7 +2831,7 @@ downsample_long <- downsample_results %>%
     values_to = "p_value"
   ) %>%
   mutate(
-    term = recode(term,
+    term = dplyr::recode(term,
       p_polyIC   = "PolyIC effect",
       p_stress   = "Stress type effect",
       p_interact = "PolyIC × Stress interaction"
@@ -3128,11 +3128,11 @@ plot_fc <- ggplot() +
     color = "Poly(I:C) Treatment"
   ) +
   theme(
-    legend.position = "right",
+    legend.position = "bottom",
     strip.text      = element_text(face = "bold")
   ); plot_fc
 
-ggsave(plot_fc, filename = "figures/qPCR/fc_genes.png", width = 10, height = 4)
+ggsave(plot_fc, filename = "figures/qPCR/fc_genes.png", width = 8, height = 4)
 ```
 
 ## Fold Change Summary Table
