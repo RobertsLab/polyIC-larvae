@@ -277,3 +277,49 @@ data%>%
                            if_else(treatment=="Treated", "Immune PolyIC", NA)))%>%
   write_csv("output/sequim_polyic_growth.csv")
 ```
+
+# Survival 
+
+```{r}
+surv<-read_xlsx("data/outplant/sequim/survival.xlsx")
+```
+
+Calculate proportion alive at each subsequent time point. 
+
+```{r}
+surv_p<-surv%>%
+  arrange(outplant_tag, date)%>%
+  group_by(outplant_tag)%>%
+  mutate(start=first(alive))%>%
+  mutate(prop_survival=1-((start-alive)/start))
+```
+
+Plot survival. 
+
+```{r}
+plot7<-surv_p%>%
+  ggplot(aes(x=treatment, y=prop_survival, fill = treatment)) +
+  facet_wrap(~date)+
+  ylim(0,1)+
+  geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
+  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
+  xlab("Treatment") + 
+  theme_classic() +
+    scale_colour_manual(values=c("darkgray", "purple3"))+
+  scale_fill_manual(values=c("darkgray", "purple3"))+
+  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1)); plot7
+```
+
+No difference in survival. 
+
+Output dataframe. 
+
+```{r}
+surv_p%>%
+  dplyr::select(date, outplant_tag, treatment, prop_survival)%>%
+  mutate(treatment=if_else(treatment=="Control", "Control", 
+                           if_else(treatment=="Treated", "Immune PolyIC", NA)))%>%
+  write_csv("output/sequim_polyic_survival.csv")
+```
+
+
