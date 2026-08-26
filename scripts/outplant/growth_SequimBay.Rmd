@@ -66,9 +66,9 @@ hist(data$width.mm)
 Remove upper outliers. 
 
 ```{r}
-data<-data%>%
-  filter(length.mm<100)%>%
-  filter(width.mm<60)
+#data<-data%>%
+#  filter(length.mm<100)%>%
+#  filter(width.mm<60)
 
 hist(data$length.mm)
 hist(data$width.mm)
@@ -106,7 +106,7 @@ Obtain training data with known length width and depth from 20240909 and 2025100
 ```{r}
 training_data<-read_csv(file="https://raw.githubusercontent.com/RobertsLab/project-gigas-conditioning/refs/heads/main/data/outplanting/GoosePoint/growth_GoosePoint.csv")%>%
   mutate(date=as.factor(date))%>%
-  filter(date %in% c("20240909", "20251009"))
+  filter(date %in% c("20240909", "20251009", "20260522"))
 
 training_data$volume <- (4/3) * pi * (training_data$length.mm/2) * (training_data$width.mm/2) * (training_data$depth.mm/2)
 
@@ -149,7 +149,7 @@ Proceed with the calculated volume data.
 Remove upper outliers 
 ```{r}
 data<-data%>%
-  filter(Predicted_Volume_Poly<60000)
+  filter(Predicted_Volume_Poly<100000)
 
 hist(data$Predicted_Volume_Poly)
 ```
@@ -175,8 +175,8 @@ Plot summarized by treatment
 
 ```{r}
 plot5<-data%>%
-  ggplot(aes(x=date, y=Predicted_Volume_Poly, fill = treatment)) +
-  facet_wrap(~treatment)+
+  ggplot(aes(x=treatment, y=Predicted_Volume_Poly, fill = treatment)) +
+  facet_wrap(~date)+
   geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
   geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
   xlab("Treatment") + 
@@ -197,8 +197,8 @@ plot6<-data%>%
   group_by(treatment, date)%>%
   summarise(mean=mean(Predicted_Volume_Poly, na.rm=TRUE), se=sd(Predicted_Volume_Poly, na.rm=TRUE)/sqrt(length(Predicted_Volume_Poly)))%>%
   
-  ggplot(aes(x=date, y=mean, fill = treatment)) +
-  facet_wrap(~treatment)+
+  ggplot(aes(x=treatment, y=mean, fill = treatment)) +
+  facet_wrap(~date)+
   geom_point(pch = 21) +
   geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=0)+
   xlab("Bag") + 
@@ -207,8 +207,6 @@ plot6<-data%>%
   theme_classic() + 
   theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1)); plot6
 ```
-
-Treated oysters appear to have maintained size more than control - perhaps fewer of the large oysters died?   
 
 ## Run linear mixed models models 
 
