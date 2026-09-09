@@ -175,15 +175,17 @@ Plot summarized by treatment
 
 ```{r}
 plot5<-data%>%
-  ggplot(aes(x=treatment, y=Predicted_Volume_Poly, fill = treatment)) +
-  facet_wrap(~date)+
+  ggplot(aes(x=as.factor(date), y=Predicted_Volume_Poly, fill = treatment)) +
+  #facet_wrap(~treatment)+
   geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
-  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
-  xlab("Treatment") + 
+  geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4), alpha=0.3) +
+  xlab("Date") + 
+  ylab("Volume")+
   theme_classic() +
-    scale_colour_manual(values=c("darkgray", "purple3"))+
-  scale_fill_manual(values=c("darkgray", "purple3"))+
-  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1)); plot5
+    scale_colour_manual(values=c("#00BFC4", "#F8766D"))+
+  scale_fill_manual(values=c("#00BFC4", "#F8766D"))+
+  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1), 
+        legend.position="right"); plot5
 
 ggsave(plot5, filename="figures/outplant/sequim_sizes.png", width=6, height=4, units="in")
 ```
@@ -298,16 +300,19 @@ Plot survival.
 
 ```{r}
 plot7<-surv_p%>%
-  ggplot(aes(x=treatment, y=prop_survival, fill = treatment)) +
-  facet_wrap(~date)+
+  ggplot(aes(x=as.factor(date), y=prop_survival, fill = treatment, group=interaction(date,treatment))) +
   ylim(0,1)+
   geom_boxplot(width=.5, outlier.shape= NA, position = position_dodge(width = 0.4)) +
   geom_point(pch = 21, position=position_jitterdodge(dodge.width=0.4)) +
-  xlab("Treatment") + 
+  xlab("Date") + 
+  ylab("Proportion Survival")+
   theme_classic() +
-    scale_colour_manual(values=c("darkgray", "purple3"))+
-  scale_fill_manual(values=c("darkgray", "purple3"))+
-  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1)); plot7
+    scale_colour_manual(values=c("#00BFC4", "#F8766D"))+
+  scale_fill_manual(values=c("#00BFC4", "#F8766D"))+
+  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1), 
+        legend.position="none"); plot7
+
+ggsave(plot7, filename="figures/outplant/sequim_survival.png", width=4, height=4, units="in")
 ```
 
 No difference in survival. 
