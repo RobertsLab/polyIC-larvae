@@ -134,9 +134,9 @@ plot1 <-ggplot(growth, aes(x = age_days, y = length.mm, color = treatment, fill=
   ) +
   scale_color_manual(values = c("control" = "cyan3", "treatment" = "coral1"), labels=c("control", "treated")) +
   scale_fill_manual(values = c("control" = "cyan3", "treatment" = "coral1"), labels=c("control", "treated")) +
-  geom_text(x=93, y=7, label="*", size=8, inherit.aes=FALSE)+
-  geom_text(x=59, y=5, label="*", size=8, inherit.aes=FALSE)+
-  geom_text(x=236, y=13.8, label="*", size=8, inherit.aes=FALSE)+
+  geom_text(x=150, y=13, label="P[treatment]=0.284", color="darkgrey", size=5, inherit.aes=FALSE)+
+  geom_text(x=150, y=12, label="P[age]<0.001", size=5, inherit.aes=FALSE)+
+  geom_text(x=150, y=11, label="P[treatment x age]<0.001", size=5, inherit.aes=FALSE)+
   theme_classic(base_size = 16);plot1
 
 ggsave(plot1, filename="figures/growth/growth.png", width=6, height=5)
@@ -148,7 +148,7 @@ ggsave(plot1, filename="figures/growth/growth.png", width=6, height=5)
 ```{r}
 head(growth)
 
-model<-lm(length.mm ~ treatment * as.factor(age_days), data=growth)
+model<-lmer(length.mm ~ treatment * age_days+(1|tank), data=growth)
 summary(model)
 car::Anova(model, type = "II")
 
@@ -160,7 +160,8 @@ plot(model, which = 3)   # Scale-Location plot
 
 #use a transformation to meet assumptions 
 
-model<-lm(log10(length.mm) ~ treatment * as.factor(age_days), data=growth)
+model<-lmer(log10(length.mm) ~ treatment * age_days+(1|tank), data=growth)
+summary(model)
 car::Anova(model, type = "II")
 qqPlot(residuals(model))
 
@@ -168,13 +169,11 @@ plot(model, which = 1)   # Residuals vs fitted
 plot(model, which = 3)   # Scale-Location plot
 
 #assumptions met 
-```
+rand(model)
 
-View post hoc tests. 
-```{r}
+model<-lmer(log10(length.mm) ~ treatment * as.factor(age_days)+(1|tank), data=growth)
 emm<-emmeans(model, ~treatment|as.factor(age_days))
 pairs(emm)
-
 ```
 
 
