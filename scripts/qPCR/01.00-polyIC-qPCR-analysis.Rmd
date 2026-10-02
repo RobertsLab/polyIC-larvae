@@ -312,14 +312,14 @@ consistent raw Cq across all conditions is the defining property of a good norma
 ("housekeeping") gene. Genes whose expression itself responds to treatment are poor
 normalizers, even if technically "stable" in a QC sense.
 
-Box plot and statistical group comparisons below are restricted to genes with a
-**complete set of data** -- i.e., no sample-gene combinations missing from the dataset,
-and none dropped due to QC (Std. Dev. or outlier-replicate filtering) -- so that
-treatment groups are being compared on equal footing (same samples contributing to every
-group). The full summary table further down reports descriptive statistics for **all**
-genes, flagging which ones meet this completeness criterion.
+Box plots and statistical group comparisons below include **every gene**, including
+those missing some sample-gene combinations and/or with samples dropped for QC (Std.
+Dev. or outlier-replicate filtering). Treatment-group sample sizes are therefore
+unequal for genes with missing data -- the completeness table immediately below
+reports exactly how many samples are missing/dropped per gene, so that result should
+be read alongside the box plots and ANOVA results for those genes.
 
-## Identify genes with complete data
+## Data completeness by gene
 
 ```{r rawcq-completeness-check}
 #| hold: true
@@ -388,7 +388,8 @@ complete_genes <- gene_completeness %>%
 
 cat("\nGenes with a complete set of samples (none missing, none dropped for QC):\n  ",
     paste(complete_genes, collapse = ", "), "\n")
-cat("\nThese are the only genes carried forward into the box plots and statistical tests below.\n")
+cat("\nAll genes are carried forward into the box plots and statistical tests below;",
+    "treatment-group sample sizes are unequal for the incomplete genes listed above.\n")
 ```
 
 ## Raw Cq summary statistics (all genes)
@@ -430,33 +431,33 @@ knitr::kable(raw_cq_summary, digits = 3,
                               "directly comparable to the complete-data genes."))
 ```
 
-## Box plots: raw Cq by treatment group (complete-data genes)
-
-### All treatment groups
+## Box plots and statistical comparisons: raw Cq by treatment group (all genes)
 
 ```{r rawcq-boxplot-all-groups}
 #| hold: true
 #| label: rawcq-boxplot-all-groups
-#| fig.width: 10
-#| fig.height: 6
+#| fig.width: 11
+#| fig.height: 11
 
 treatment_order <- c("No_PolyIC_Control", "No_PolyIC_Temperature", "No_PolyIC_Mechanical",
                       "PolyIC_Control", "PolyIC_Temperature", "PolyIC_Mechanical")
 
-rawcq_complete_df <- grouped_df %>%
-  filter(Target %in% complete_genes) %>%
+rawcq_all_df <- grouped_df %>%
   mutate(treatment_group = factor(treatment_group, levels = treatment_order))
 
 # One-way ANOVA per gene (Cq.Mean ~ treatment_group) with Tukey HSD post-hoc and
 # a Compact Letter Display (CLD) for plot annotation. `emmeans:::cld.emmGrid` is
 # called directly (rather than the `multcomp::cld()` generic) because the S3 method
 # dispatch for emmGrid objects is sensitive to package load order in some sessions.
+# Treatment-group sample sizes are unbalanced for genes with missing data (see the
+# completeness table above); `aov`/`TukeyHSD`/`emmeans` all handle unbalanced designs,
+# but statistical power is reduced for groups with few observations.
 rawcq_anova_models <- list()
 rawcq_tukey <- list()
 rawcq_cld <- data.frame()
 
-for (gene in complete_genes) {
-  gene_df <- rawcq_complete_df %>% filter(Target == gene)
+for (gene in rawcq_all_genes) {
+  gene_df <- rawcq_all_df %>% filter(Target == gene)
   mod <- aov(Cq.Mean ~ treatment_group, data = gene_df)
   rawcq_anova_models[[gene]] <- mod
   rawcq_tukey[[gene]] <- TukeyHSD(mod)
@@ -472,11 +473,11 @@ rawcq_cld <- rawcq_cld %>%
   mutate(treatment_group = factor(treatment_group, levels = treatment_order))
 
 # Position CLD letters above the max value for each gene x treatment_group panel
-rawcq_y_range_per_gene <- rawcq_complete_df %>%
+rawcq_y_range_per_gene <- rawcq_all_df %>%
   group_by(Target) %>%
   summarise(y_range = max(Cq.Mean, na.rm = TRUE) - min(Cq.Mean, na.rm = TRUE), .groups = "drop")
 
-rawcq_y_max_per_group <- rawcq_complete_df %>%
+rawcq_y_max_per_group <- rawcq_all_df %>%
   group_by(Target, treatment_group) %>%
   summarise(max_y = max(Cq.Mean, na.rm = TRUE), .groups = "drop")
 
@@ -485,11 +486,11 @@ rawcq_cld_plot <- rawcq_cld %>%
   left_join(rawcq_y_range_per_gene, by = "Target") %>%
   mutate(y_pos = max_y + y_range * 0.08)
 
-p_rawcq_all <- rawcq_complete_df %>%
+p_rawcq_all <- rawcq_all_df %>%
   ggplot(aes(x = treatment_group, y = Cq.Mean, fill = treatment_group)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.8) +
-  geom_jitter(width = 0.15, alpha = 0.4, size = 1) +
-  facet_wrap(~Target, scales = "free_y") +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_wrap(~Target, scales = "free_y", ncol = 3) +
   scale_fill_manual(values = c(
     "No_PolyIC_Control" = "darkgray", "No_PolyIC_Temperature" = "salmon",
     "No_PolyIC_Mechanical" = "steelblue", "PolyIC_Control" = "gray40",
@@ -499,101 +500,41 @@ p_rawcq_all <- rawcq_complete_df %>%
   coord_cartesian(clip = "off") +
   theme_bw() +
   labs(
-    title = "Raw Cq by Treatment Group (Complete-Data Genes Only)",
-    subtitle = "Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter are not significantly different",
+    title = "Raw Cq by Treatment Group (All Genes)",
+    subtitle = paste("Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter",
+                      "are not significantly different. Group sizes are unequal for genes",
+                      "with missing samples (see completeness table above)."),
     x = "Treatment Group", y = "Raw Cq (mean of technical replicates)", fill = "Treatment Group"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
   geom_text(data = rawcq_cld_plot, aes(x = treatment_group, y = y_pos, label = label),
-            inherit.aes = FALSE, size = 4, fontface = "bold", color = "darkorange")
+            inherit.aes = FALSE, size = 3.3, fontface = "bold", color = "darkorange")
 
 print(p_rawcq_all)
 ```
 
-### Focused comparison: Control vs Poly I:C only
-
-The comparison below isolates the **basic control vs Poly I:C control** contrast --
-Poly I:C treatment alone, with no additional (mechanical) stressor -- which is the
-cleanest test of whether Poly I:C exposure itself shifts a candidate gene's raw
-expression. It deliberately excludes the combined Poly I:C + Mechanical stress group.
-
-```{r rawcq-ttest-control-polyic}
+```{r rawcq-anova-summary-table}
 #| hold: true
 #| results: hold
-#| label: rawcq-ttest-control-polyic
+#| label: rawcq-anova-summary-table
 
-rawcq_control_data <- rawcq_complete_df %>%
-  filter(stress_type == "Control") %>%
-  mutate(polyIC = factor(polyIC, levels = c("No_PolyIC", "PolyIC")))
-
-rawcq_control_comparison <- rawcq_control_data %>%
-  group_by(Target) %>%
-  summarise(
-    n_no_polyIC = sum(polyIC == "No_PolyIC"),
-    n_polyIC = sum(polyIC == "PolyIC"),
-    mean_no_polyIC = mean(Cq.Mean[polyIC == "No_PolyIC"], na.rm = TRUE),
-    sd_no_polyIC = sd(Cq.Mean[polyIC == "No_PolyIC"], na.rm = TRUE),
-    mean_polyIC = mean(Cq.Mean[polyIC == "PolyIC"], na.rm = TRUE),
-    sd_polyIC = sd(Cq.Mean[polyIC == "PolyIC"], na.rm = TRUE),
-    mean_diff = mean_polyIC - mean_no_polyIC,
-    pvalue = t.test(Cq.Mean[polyIC == "No_PolyIC"], Cq.Mean[polyIC == "PolyIC"])$p.value,
-    .groups = "drop"
+rawcq_anova_summary <- purrr::map_dfr(rawcq_all_genes, function(gene) {
+  sm <- summary(rawcq_anova_models[[gene]])[[1]]
+  data.frame(
+    Target = gene,
+    df_treatment = sm["treatment_group", "Df"],
+    F_value = sm["treatment_group", "F value"],
+    p_value = sm["treatment_group", "Pr(>F)"]
   )
+}) %>%
+  mutate(significant = p_value <= 0.05) %>%
+  arrange(p_value)
 
-knitr::kable(rawcq_control_comparison, digits = 4,
-             caption = "Welch t-test: raw Cq, basic Control vs Poly I:C Control (complete-data genes only)")
-```
-
-```{r rawcq-boxplot-control-polyic}
-#| hold: true
-#| label: rawcq-boxplot-control-polyic
-#| fig.width: 8
-#| fig.height: 5
-
-# Significance annotation from the t-test above
-rawcq_sig_control <- rawcq_control_comparison %>%
-  filter(pvalue <= 0.05) %>%
-  mutate(label = case_when(
-    pvalue < 0.001 ~ "***",
-    pvalue < 0.01  ~ "**",
-    TRUE           ~ "*"
-  ))
-
-if (nrow(rawcq_sig_control) > 0) {
-  rawcq_y_pos_control <- rawcq_control_data %>%
-    group_by(Target) %>%
-    summarise(max_y = max(Cq.Mean, na.rm = TRUE), .groups = "drop")
-
-  rawcq_sig_control <- rawcq_sig_control %>%
-    left_join(rawcq_y_pos_control, by = "Target") %>%
-    mutate(y_pos = max_y * 1.03, bracket_y = max_y * 1.015)
-}
-
-p_rawcq_focus <- rawcq_control_data %>%
-  ggplot(aes(x = polyIC, y = Cq.Mean, fill = polyIC)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.8, width = 0.6) +
-  geom_jitter(width = 0.1, alpha = 0.5, size = 1.3) +
-  facet_wrap(~Target, scales = "free_y") +
-  scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "firebrick")) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.12))) +
-  theme_bw() +
-  labs(
-    title = "Raw Cq: Basic Control vs Poly I:C Control (Complete-Data Genes)",
-    subtitle = "Poly I:C alone, excluding combined mechanical + Poly I:C stress; asterisks = Welch t-test p \u2264 0.05",
-    x = "Treatment", y = "Raw Cq (mean of technical replicates)", fill = "Treatment"
-  ) +
-  theme(legend.position = "bottom")
-
-if (nrow(rawcq_sig_control) > 0) {
-  p_rawcq_focus <- p_rawcq_focus +
-    geom_segment(data = rawcq_sig_control,
-                 aes(x = 1, xend = 2, y = bracket_y, yend = bracket_y),
-                 inherit.aes = FALSE, color = "darkorange") +
-    geom_text(data = rawcq_sig_control, aes(x = 1.5, y = y_pos, label = label),
-              inherit.aes = FALSE, size = 6, color = "darkorange", fontface = "bold")
-}
-
-print(p_rawcq_focus)
+knitr::kable(rawcq_anova_summary, digits = c(0, 0, 0, 3, 6, 0),
+             caption = paste("One-way ANOVA (Cq.Mean ~ treatment_group) per gene.",
+                              "A significant result (p <= 0.05) indicates raw Cq differs",
+                              "across treatment groups -- i.e., the gene is NOT stable",
+                              "across conditions and is a poor normalizing-gene candidate."))
 ```
 
 ## Normalizing gene candidate ranking
@@ -608,16 +549,16 @@ cat("All genes (lower CV = more stable raw Cq across all samples/treatments):\n\
 print(raw_cq_summary %>% dplyr::select(rank_CV, Target, cv_percent, sd_Cq, range_Cq, data_status),
       row.names = FALSE)
 
-cat("\n\nRestricted to genes with a complete set of data (fair group-wise comparison):\n\n")
-raw_cq_summary %>%
-  filter(data_status == "Complete (all samples, no QC drops)") %>%
-  dplyr::select(rank_CV, Target, cv_percent, sd_Cq, range_Cq) %>%
-  print(row.names = FALSE)
+cat("\n\nOne-way ANOVA significance (raw Cq ~ treatment_group), all genes:\n\n")
+print(rawcq_anova_summary %>% dplyr::select(Target, F_value, p_value, significant),
+      row.names = FALSE)
 
 cat("\nNote: a low overall CV is necessary but not sufficient for a good normalizer --",
-    "the ANOVA/Tukey results and the Control vs Poly I:C comparison above additionally",
-    "indicate whether a candidate gene's raw Cq shifts systematically with treatment,",
-    "which would make it unsuitable for normalization even if its overall CV is low.\n")
+    "the ANOVA results above additionally indicate whether a candidate gene's raw Cq",
+    "shifts systematically with treatment group, which would make it unsuitable for",
+    "normalization even if its overall CV is low. Genes flagged 'Incomplete' in the",
+    "summary table have unequal group sizes due to missing/QC-dropped samples, which",
+    "should be weighed when interpreting both the CV ranking and the ANOVA result.\n")
 ```
 
 # Calculate Delta Cq
