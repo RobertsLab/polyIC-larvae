@@ -302,6 +302,7 @@ grouped_df %>%
 ```
 
 
+
 # Calculate Delta Cq
 
 ```{r calculate-delta-cq}
@@ -310,12 +311,57 @@ grouped_df %>%
 # Calculate delta Cq by subtracting GAPDH Cq.Mean from each corresponding Sample Cq.Mean
 delta_Cq_df <- calculate_delta_Cq(grouped_df)
 
+gapdh<-delta_Cq_df%>%
+  filter(Target == "GAPDH")
+
 # Filter out normalizing gene (GAPDH), since no need to compare normalizing gene to itself
 delta_Cq_df <- delta_Cq_df %>%
-  filter(Target != "GAPDH")
+  filter(!Target == "GAPDH")
 
 str(delta_Cq_df)
 ```
+
+# Examine GAPDH normalzing gene 
+
+Examine Cq.Mean values of GAPDH gene 
+```{r}
+head(gapdh)
+```
+
+Plot Cq.Mean values for GAPDH
+
+```{r}
+gapdh%>%
+  filter(!stress_type=="Mechanical")%>%
+  
+  ggplot(aes(x=stress_type, colour=polyIC, y=Cq.Mean))+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-gapdh%>%
+  filter(!stress_type=="Mechanical")%>%
+  
+  aov(Cq.Mean~polyIC*stress_type, data=.)
+
+summary(model)
+```
+
+Plot Cq values before normalization of viperin, HSP70, and HSP90
+```{r}
+delta_Cq_df%>%
+  filter(!stress_type=="Mechanical")%>%
+  filter(Target %in% c("HSP70", "HSP90", "VIPERIN"))%>%
+  
+  ggplot(aes(x=stress_type, colour=polyIC, y=Cq.Mean))+
+  facet_wrap(~Target)+
+  geom_boxplot()+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
 
 # Missing samples analysis
 
