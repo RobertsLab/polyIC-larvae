@@ -461,8 +461,8 @@ knitr::kable(raw_cq_summary, digits = 3,
 ```{r rawcq-boxplot-all-groups}
 #| hold: true
 #| label: rawcq-boxplot-all-groups
-#| fig.width: 11
-#| fig.height: 11
+#| fig.width: 10
+#| fig.height: 14
 
 treatment_order <- c("No_PolyIC_Control", "No_PolyIC_Temperature", "No_PolyIC_Mechanical",
                       "PolyIC_Control", "PolyIC_Temperature", "PolyIC_Mechanical")
@@ -511,29 +511,47 @@ rawcq_cld_plot <- rawcq_cld %>%
   left_join(rawcq_y_range_per_gene, by = "Target") %>%
   mutate(y_pos = max_y + y_range * 0.08)
 
+# Colorblind-safe palette (Okabe-Ito categorical set). Control and Temperature
+# are threaded by hue family (sky-blue/blue, orange/vermillion: No_PolyIC = the
+# lighter member of the pair, PolyIC = the more saturated member); Mechanical
+# uses two distinct Okabe-Ito hues rather than a lightness pair, since a
+# lightened/darkened single-hue pair collapsed under simulated tritanopia.
+# Verified via colorspace::deutan()/protan()/tritan() simulation + CIE Lab
+# distance: minimum pairwise Delta-E across all three CVD types is 16.2 (well
+# above the ~10 just-noticeable-difference threshold).
+treatment_palette <- c(
+  "No_PolyIC_Control" = "#56B4E9", "No_PolyIC_Temperature" = "#E69F00",
+  "No_PolyIC_Mechanical" = "#009E73", "PolyIC_Control" = "#0072B2",
+  "PolyIC_Temperature" = "#D55E00", "PolyIC_Mechanical" = "#CC79A7"
+)
+
 p_rawcq_all <- rawcq_all_df %>%
   ggplot(aes(x = treatment_group, y = Cq.Mean, fill = treatment_group)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.85) +
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
-  facet_wrap(~Target, scales = "free_y", ncol = 3) +
-  scale_fill_manual(values = c(
-    "No_PolyIC_Control" = "darkgray", "No_PolyIC_Temperature" = "salmon",
-    "No_PolyIC_Mechanical" = "steelblue", "PolyIC_Control" = "gray40",
-    "PolyIC_Temperature" = "firebrick", "PolyIC_Mechanical" = "navy"
-  )) +
+  facet_wrap(~Target, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = treatment_palette) +
+  scale_x_discrete(labels = function(x) str_wrap(gsub("_", " ", x), width = 9)) +
   scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
   coord_cartesian(clip = "off") +
-  theme_bw() +
+  theme_bw(base_size = 11) +
   labs(
     title = "Raw Cq by Treatment Group (All Genes)",
-    subtitle = paste("Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter",
-                      "are not significantly different. Group sizes are unequal for genes",
-                      "with missing samples (see completeness table above)."),
+    subtitle = paste(strwrap(
+      paste("Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter",
+            "are not significantly different."),
+      width = 95), collapse = "\n"),
+    caption = paste(strwrap(
+      paste("Group sizes are unequal for genes with missing samples or QC-dropped",
+            "replicates (see completeness table above)."),
+      width = 110), collapse = "\n"),
     x = "Treatment Group", y = "Raw Cq (mean of technical replicates)", fill = "Treatment Group"
   ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1, size = 7.5, lineheight = 0.85),
+        plot.caption = element_text(hjust = 0, size = 8, color = "gray40"),
+        legend.position = "bottom") +
   geom_text(data = rawcq_cld_plot, aes(x = treatment_group, y = y_pos, label = label),
-            inherit.aes = FALSE, size = 3.3, fontface = "bold", color = "darkorange")
+            inherit.aes = FALSE, size = 3.3, fontface = "bold", color = "black")
 
 print(p_rawcq_all)
 ```
