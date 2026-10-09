@@ -1,0 +1,655 @@
+---
+title: "01.01-polyIC-qPCR-analysis"
+author: "Sam White"
+date: "2026-10-08"
+output:
+  github_document:
+    toc: true
+    number_sections: true
+  bookdown::html_document2:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    code_download: true
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    code_download: true
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# Background
+
+Oyster larvae in this experiment were exposed to poly:IC (a synthetic viral-infection
+mimic) and/or mechanical stress, crossed into six treatment groups: `No_PolyIC_Control`,
+`No_PolyIC_Temperature`, `No_PolyIC_Mechanical`, `PolyIC_Control`, `PolyIC_Temperature`,
+and `PolyIC_Mechanical`. Expression of eight candidate genes (ATP.Synthase,
+Citrate.Synthase, DNMT1, GAPDH, HSP70, HSP90, VIPERIN, cGAS) was measured by qPCR.
+
+Before relative-expression (delta-Cq) analysis can be performed on any of these genes,
+a **normalizing (reference) gene** is needed -- a gene whose raw Cq is stable across all
+treatment groups, so that it can be used to correct for sample-to-sample differences in
+input RNA/cDNA quantity. A gene that itself responds to treatment is not a valid
+normalizer, regardless of how technically consistent its measurement is.
+
+This script identifies that normalizing gene. It:
+
+1. Loads and QCs the raw Cq data (removes NTC wells, flags high-variance technical
+   replicates, removes outlier replicates).
+2. For the `PolyIC_Control` group specifically, restricts the data to the 2026-10-08
+   qPCR run (Sam's qPCR data) wherever that run exists -- see "Restrict PolyIC_Control
+   data source" below.
+3. Summarizes raw Cq per sample/gene and parses treatment-group identity from sample
+   names.
+4. Compares raw Cq distributions across all six treatment groups for each gene via
+   one-way ANOVA with Tukey HSD post-hoc testing.
+5. Ranks the eight candidate genes by coefficient of variation (CV%) of raw Cq, and
+   flags any gene whose raw Cq differs significantly across treatment groups.
+
+The gene identified here as the most stable, treatment-insensitive candidate is carried
+forward as the normalizing gene in a separate downstream relative-expression analysis
+script.
+
+```{r setup}
+#| hold: true
+#| label: setup
+#| results: hold
+
+# Set output directory
+output_dir <- "output/qPCR/01.00-polyIC-qPCR-analysis"
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+knitr::opts_chunk$set(
+  echo = TRUE,         # Display code chunks
+  eval = TRUE,        # Evaluate code chunks
+  warning = FALSE,     # Hide warnings
+  message = FALSE,     # Hide messages
+  comment = "",        # Prevents appending '##' to beginning of lines in code output
+  fig.path = file.path(output_dir, "figures/")
+)
+
+library(tidyverse)
+library(ggplot2)
+library(car)
+library(emmeans)
+library(multcomp)
+```
+
+# Load Data
+```{r load-data}
+#| hold: true
+#| results: hold
+#| label: load-data
+# Load qPCR data
+
+# Define file URLs and target names in a structured format
+file_list <- list(
+  # CITRATE SYNTHASE
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_15-32-08_Connect-citrate_synthase-01--Quantification-Cq_Results.csv", 
+       target = "Citrate.Synthase", gene = "citrate_synthase"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_15-30-47_CFX96-citrate_synthase-02-Quantification-Cq_Results.csv", 
+       target = "Citrate.Synthase", gene = "citrate_synthase"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_16-31-12_Connect-citrate_synthase-03-Quantification-Cq_Results.csv", 
+       target = "Citrate.Synthase", gene = "citrate_synthase"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/admin_2025-08-12%2011-18-15_Connect_citrate_VV-SJW-Quantification-Cq_Results.csv", 
+       target = "Citrate.Synthase", gene = "citrate_synthase"),
+  
+  # DNMT1
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_13-34-02_Connect-DNMT1-01-Quantification-Cq_Results.csv", 
+       target = "DNMT1", gene = "DNMT1"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_13-29-34_CFX96-DNMT1-02%20Quantification-Cq_Results.csv", 
+       target = "DNMT1", gene = "DNMT1"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_14-33-31_Connect-DNMT1-03-Quantification-Cq_Results.csv", 
+       target = "DNMT1", gene = "DNMT1"),
+  list(url = "https://github.com/RobertsLab/polyIC-larvae/raw/refs/heads/main/data/qPCR/Cq/sam_2026-10-08_09-19-38_Connect-DNMT1-Quantification-Cq_Results.csv", 
+       target = "DNMT1", gene = "DNMT1"),
+  
+  # cGAS
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_11-25-14_Connect-cGAS-01-Quantification-Cq_Results.csv", 
+       target = "cGAS", gene = "cGAS"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_11-49-08_CFX96-cGAS-02-Quantification-Cq_Results.csv", 
+       target = "cGAS", gene = "cGAS"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-27_12-35-04_Connect-cGAS-03-QuantificationCq_Results.csv", 
+       target = "cGAS", gene = "cGAS"),
+  list(url = "https://github.com/RobertsLab/polyIC-larvae/raw/refs/heads/main/data/qPCR/Cq/sam_2026-10-08_09-37-12_CFX96-cGAS-Quantification-Cq_Results.csv", 
+       target = "cGAS", gene = "cGAS"),
+  
+  # ATP SYNTHASE
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_09-56-00_Connect-ATP_synthase-01-QuantificationCq_Results.csv", 
+       target = "ATP.Synthase", gene = "ATP_synthase"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_10-13-15_CFX96-ATP_synthase-02-Quantification-Cq_Results.csv", 
+       target = "ATP.Synthase", gene = "ATP_synthase"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_10-55-49_Connect-ATP_synthase-03-Quantification-Cq_Results.csv", 
+       target = "ATP.Synthase", gene = "ATP_synthase"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/admin_2025-08-14%2011-11-18_Connect_ATPase_vv-SJW-Quantification-Cq_Results.csv", 
+       target = "ATP.Synthase", gene = "ATP_synthase"),
+  
+  # GAPDH
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_12-06-16_Connect-GAPDH-01-Quantification-Cq_Results.csv", 
+       target = "GAPDH", gene = "GAPDH"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_12-07-20_CFX96-GAPDH-02-Quantification-Cq_Results.csv", 
+       target = "GAPDH", gene = "GAPDH"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_13-05-59_Connect-GAPDH-03-Quantification-Cq_Results.csv", 
+       target = "GAPDH", gene = "GAPDH"),
+  list(url = "https://github.com/RobertsLab/polyIC-larvae/raw/refs/heads/main/data/qPCR/Cq/sam_2026-10-08_10-20-43_Connect-GAPDH-Quantification-Cq_Results.csv", 
+       target = "GAPDH", gene = "GAPDH"),
+  
+  # HSP70
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_14-03-35_Connect-HSP70-01-Quantification-Cq_Results.csv", 
+       target = "HSP70", gene = "HSP70"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_14-25-31_CFX96-HSP70-02-Quantification-Cq_Results.csv", 
+       target = "HSP70", gene = "HSP70"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_15-00-57_Connect-HSP70-03-Quantification-Cq_Results.csv", 
+       target = "HSP70", gene = "HSP70"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/admin_2025-08-12%2014-19-37_Connect_HSP70_vv-SJW-Quantification-Cq_Results.csv", 
+       target = "HSP70", gene = "HSP70"),
+  
+  # HSP90
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28-16-06-43_Connect-HSP90-01-QuantificationCq_Results.csv", 
+       target = "HSP90", gene = "HSP90"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_16-07-47_CFX96-HSP90-02-Quantification-Cq_Results.csv", 
+       target = "HSP90", gene = "HSP90"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-28_17-07-09_Connect-HSP90-03-Quantification-Cq_Results.csv", 
+       target = "HSP90", gene = "HSP90"),
+  list(url = "https://github.com/RobertsLab/polyIC-larvae/raw/refs/heads/main/data/qPCR/Cq/sam_2026-10-08_09-37-12_CFX96-HSP90-Quantification-Cq_Results.csv", 
+       target = "HSP90", gene = "HSP90"),
+  
+  # VIPERIN
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-29_07-21-16_Connect-VIPERIN-01-QuantificationCq_Results.csv", 
+       target = "VIPERIN", gene = "VIPERIN"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-29_07-39-06_CFX96-VIPERIN-02-Quantification-Cq_Results.csv", 
+       target = "VIPERIN", gene = "VIPERIN"),
+  list(url = "https://raw.githubusercontent.com/RobertsLab/polyIC-larvae/refs/heads/main/data/qPCR/Cq/sam_2026-01-29_08-24-59_Connect-VIPERIN-03-QuantificationCq_Results.csv", 
+       target = "VIPERIN", gene = "VIPERIN"),
+  list(url = "https://github.com/RobertsLab/polyIC-larvae/raw/refs/heads/main/data/qPCR/Cq/sam_2026-10-08_09-19-38_Connect-VIPERIN-Quantification-Cq_Results.csv", 
+       target = "VIPERIN", gene = "VIPERIN")
+)
+
+# Load all files and combine automatically
+qpcr_data <- map_df(file_list, function(file_info) {
+  read.csv(file_info$url) %>%
+    mutate(Target = file_info$target,
+           source_file = basename(file_info$url))
+})
+
+```
+
+## Restrict PolyIC_Control data source
+
+The `PolyIC_Control` (`*PC`) samples were qPCR'd more than once over the course of this
+project. Where a 2026-10-08 qPCR run (Sam's qPCR data) exists for a gene, this analysis
+uses that run for `PolyIC_Control` samples and excludes older runs for that gene. Genes
+with no 2026-10-08 rerun keep their existing `PolyIC_Control` data unchanged (there is no
+alternative source for them).
+
+```{r restrict-polyIC-control-source}
+#| hold: true
+#| results: hold
+#| label: restrict-polyIC-control-source
+
+# Genes that were re-run on 2026-10-08 for PolyIC_Control (*PC) samples
+genes_with_oct2026_pc <- qpcr_data %>%
+  filter(str_detect(Sample, "PC$"), str_detect(source_file, "^sam_2026-10-08")) %>%
+  distinct(Target) %>%
+  pull(Target)
+
+# For those genes only, drop any PolyIC_Control row not sourced from the 2026-10-08
+# run. Genes without a 2026-10-08 rerun are left untouched.
+n_before <- nrow(qpcr_data)
+
+qpcr_data <- qpcr_data %>%
+  filter(!(str_detect(Sample, "PC$") &
+           Target %in% genes_with_oct2026_pc &
+           !str_detect(source_file, "^sam_2026-10-08")))
+
+cat("PolyIC_Control rows removed (older runs, for genes with a 2026-10-08 rerun):",
+    n_before - nrow(qpcr_data), "\n\n")
+
+qpcr_data %>%
+  filter(str_detect(Sample, "PC$")) %>%
+  distinct(Target, source_file) %>%
+  arrange(Target, source_file) %>%
+  knitr::kable(caption = "PolyIC_Control data sources, by gene")
+```
+
+# Data Cleaning
+
+## Remove NTC samples
+
+```{r remove-ntc}
+#| hold: true
+#| label: remove-ntc
+# Remove rows with Sample name "NTC" or empty/NA Sample names
+qpcr_data <- qpcr_data %>%
+  filter(Sample != "NTC" & !is.na(Sample) & Sample != "")
+
+str(qpcr_data)
+```
+
+## Check for high standard deviations
+
+```{r check-std-dev}
+#| hold: true
+#| results: hold
+#| label: check-std-dev
+# Filter out rows where Cq.Std..Dev is NA
+qpcr_data <- qpcr_data[!is.na(qpcr_data$Cq.Std..Dev), ]
+
+# Filter rows where Cq.Std..Dev is greater than 0.5
+high_cq_std_dev <- qpcr_data[qpcr_data$Cq.Std..Dev > 0.5, ]
+
+# Print the filtered rows with specified columns, without row names
+print(high_cq_std_dev[, c("Target", "Sample", "Cq", "Cq.Std..Dev")], row.names = FALSE)
+```
+
+## Remove outlier technical replicates
+
+```{r remove-outliers}
+#| hold: true
+#| label: remove-outliers
+# Group by Sample and Target, then filter out the outlier replicate
+qpcr_filtered <- qpcr_data %>%
+  group_by(Sample, Target) %>%
+  filter(n() == 1 | abs(Cq - median(Cq, na.rm = TRUE)) <= 0.5) %>%
+  ungroup()
+
+str(qpcr_filtered)
+```
+
+### Samples excluded due to quality control
+
+```{r excluded-samples}
+#| hold: true
+#| results: hold
+#| label: excluded-samples
+# Identify samples that were filtered out
+all_samples <- qpcr_data %>%
+  dplyr::select(Sample, Target) %>%
+  distinct()
+
+retained_samples <- qpcr_filtered %>%
+  dplyr::select(Sample, Target) %>%
+  distinct()
+
+excluded_samples <- all_samples %>%
+  anti_join(retained_samples, by = c("Sample", "Target"))
+
+if(nrow(excluded_samples) > 0) {
+  cat("Samples excluded from analysis due to high standard deviation (> 0.5):\n\n")
+  excluded_samples %>%
+    arrange(Target, Sample) %>%
+    knitr::kable()
+} else {
+  cat("No samples were excluded from the analysis.\n")
+}
+```
+
+# Group and Summarize Data
+
+```{r group-summarize}
+#| hold: true
+#| label: group-summarize
+# Group by Sample and Target, then summarize to get unique rows for each sample
+grouped_df <- qpcr_filtered %>%
+  group_by(Sample, Target) %>%
+  summarise(
+    Cq.Mean = mean(Cq, na.rm = TRUE),
+    Cq.Std..Dev = sd(Cq, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+str(grouped_df)
+```
+
+# Parse Sample Names and Add Treatment Columns
+
+Sample naming convention: Letter + Number + P (optional) + Treatment
+
+- Letter: Biological replicate
+- Number: Replicate number
+- P: PolyIC treatment (absent if no PolyIC)
+- C/T/M: Control/Temperature/Mechanical stress
+
+```{r parse-samples}
+#| hold: true
+#| label: parse-samples
+# Parse sample names to extract treatment information
+grouped_df <- grouped_df %>%
+  mutate(
+    # Extract biological replicate (first letter)
+    bio_replicate = str_extract(Sample, "^[A-Z]"),
+    
+    # Extract replicate number
+    replicate_num = str_extract(Sample, "\\d+"),
+    
+    # Check if PolyIC treatment (contains P)
+    polyIC = ifelse(str_detect(Sample, "P"), "PolyIC", "No_PolyIC"),
+    
+    # Extract stress type (last letter: C, T, or M)
+    stress_type = case_when(
+      str_detect(Sample, "C$") ~ "Control",
+      str_detect(Sample, "T$") ~ "Temperature",
+      str_detect(Sample, "M$") ~ "Mechanical",
+      TRUE ~ NA_character_
+    ),
+    
+    # Create combined treatment group
+    treatment_group = paste(polyIC, stress_type, sep = "_")
+  )
+
+str(grouped_df)
+```
+
+## View treatment groups
+
+```{r view-groups}
+#| hold: true
+#| label: view-groups
+# Check the unique treatment groups
+unique(grouped_df$treatment_group)
+
+# Count samples per treatment group
+grouped_df %>%
+  group_by(treatment_group, Target) %>%
+  summarise(n_samples = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Target, values_from = n_samples) %>%
+  knitr::kable()
+```
+
+# Raw Cq Variation Assessment for Normalizing Gene Selection
+
+This section evaluates **raw Cq values** (i.e., prior to any delta-Cq normalization) for
+each gene, using the post-QC, per-sample mean Cq already calculated in `grouped_df`
+(`Cq.Mean` = mean of technical replicates per Sample x Target, after NTC removal, high
+Std. Dev. filtering, and outlier technical-replicate removal above). The goal is to
+identify which gene varies least across samples/treatment groups, since a low and
+consistent raw Cq across all conditions is the defining property of a good normalizing
+("housekeeping") gene. Genes whose expression itself responds to treatment are poor
+normalizers, even if technically "stable" in a QC sense.
+
+Box plots and statistical group comparisons below include **every gene**, including
+those missing some sample-gene combinations and/or with samples dropped for QC (Std.
+Dev. or outlier-replicate filtering). Treatment-group sample sizes are therefore
+unequal for genes with missing data -- the completeness table immediately below
+reports exactly how many samples are missing/dropped per gene, so that result should
+be read alongside the box plots and ANOVA results for those genes.
+
+## Data completeness by gene
+
+```{r rawcq-completeness-check}
+#| hold: true
+#| results: hold
+#| label: rawcq-completeness-check
+
+# Define the "complete" sample universe as every Sample name that was actually run
+# for AT LEAST ONE gene in this dataset. (A handful of samples -- e.g. some PolyIC +
+# Mechanical combinations -- were never assayed for any gene, so they are not a fair
+# basis for flagging other genes as "incomplete".)
+rawcq_sample_universe <- grouped_df %>%
+  dplyr::select(Sample) %>%
+  distinct() %>%
+  pull(Sample) %>%
+  sort()
+
+rawcq_all_genes <- sort(unique(grouped_df$Target))
+
+cat("Sample universe size (samples run for >= 1 gene):", length(rawcq_sample_universe), "\n")
+cat("Genes evaluated:", paste(rawcq_all_genes, collapse = ", "), "\n\n")
+
+# Expected sample x gene combinations, given the sample universe above
+rawcq_expected_combinations <- expand.grid(
+  Sample = rawcq_sample_universe,
+  Target = rawcq_all_genes,
+  stringsAsFactors = FALSE
+)
+
+rawcq_actual_combinations <- grouped_df %>%
+  dplyr::select(Sample, Target) %>%
+  distinct()
+
+rawcq_missing_combinations <- rawcq_expected_combinations %>%
+  anti_join(rawcq_actual_combinations, by = c("Sample", "Target"))
+
+rawcq_missing_by_gene <- rawcq_missing_combinations %>%
+  group_by(Target) %>%
+  summarise(n_missing = n(), .groups = "drop")
+
+# Samples dropped for QC reasons (high Std. Dev. / outlier replicates), from the
+# `excluded_samples` object computed above in the "Samples excluded due to quality
+# control" chunk
+rawcq_qc_dropped_by_gene <- excluded_samples %>%
+  group_by(Target) %>%
+  summarise(n_qc_dropped = n(), .groups = "drop")
+
+gene_completeness <- data.frame(Target = rawcq_all_genes, stringsAsFactors = FALSE) %>%
+  left_join(rawcq_missing_by_gene, by = "Target") %>%
+  left_join(rawcq_qc_dropped_by_gene, by = "Target") %>%
+  mutate(
+    n_missing = ifelse(is.na(n_missing), 0, n_missing),
+    n_qc_dropped = ifelse(is.na(n_qc_dropped), 0, n_qc_dropped),
+    n_expected = length(rawcq_sample_universe),
+    n_present = n_expected - n_missing,
+    complete = (n_missing == 0) & (n_qc_dropped == 0)
+  ) %>%
+  dplyr::select(Target, n_expected, n_present, n_missing, n_qc_dropped, complete) %>%
+  arrange(Target)
+
+knitr::kable(gene_completeness,
+             caption = "Data completeness by gene, relative to the full sample universe (post-QC)")
+
+complete_genes <- gene_completeness %>%
+  filter(complete) %>%
+  pull(Target)
+
+cat("\nGenes with a complete set of samples (none missing, none dropped for QC):\n  ",
+    paste(complete_genes, collapse = ", "), "\n")
+cat("\nAll genes are carried forward into the box plots and statistical tests below;",
+    "treatment-group sample sizes are unequal for the incomplete genes listed above.\n")
+```
+
+## Raw Cq summary statistics (all genes)
+
+```{r rawcq-summary-table}
+#| hold: true
+#| results: hold
+#| label: rawcq-summary-table
+
+raw_cq_summary <- grouped_df %>%
+  group_by(Target) %>%
+  summarise(
+    n_samples = n(),
+    mean_Cq = mean(Cq.Mean, na.rm = TRUE),
+    sd_Cq = sd(Cq.Mean, na.rm = TRUE),
+    median_Cq = median(Cq.Mean, na.rm = TRUE),
+    min_Cq = min(Cq.Mean, na.rm = TRUE),
+    max_Cq = max(Cq.Mean, na.rm = TRUE),
+    range_Cq = max_Cq - min_Cq,
+    cv_percent = (sd_Cq / mean_Cq) * 100,
+    .groups = "drop"
+  ) %>%
+  left_join(gene_completeness %>% dplyr::select(Target, n_missing, n_qc_dropped, complete),
+            by = "Target") %>%
+  mutate(data_status = ifelse(complete,
+                               "Complete (all samples, no QC drops)",
+                               "Incomplete (missing/dropped samples present)")) %>%
+  arrange(cv_percent) %>%
+  mutate(rank_CV = row_number()) %>%
+  dplyr::select(rank_CV, Target, n_samples, mean_Cq, sd_Cq, median_Cq, min_Cq, max_Cq,
+                range_Cq, cv_percent, n_missing, n_qc_dropped, data_status)
+
+knitr::kable(raw_cq_summary, digits = 3,
+             caption = paste("Raw Cq summary statistics by gene, ranked by coefficient of",
+                              "variation (CV%) -- lower CV indicates more stable raw Cq",
+                              "across all samples/groups and greater suitability as a",
+                              "normalizing gene. Genes flagged 'Incomplete' are missing",
+                              "samples or had samples dropped for QC, so their CV may not be",
+                              "directly comparable to the complete-data genes."))
+```
+
+## Box plots and statistical comparisons: raw Cq by treatment group (all genes)
+
+```{r rawcq-boxplot-all-groups}
+#| hold: true
+#| label: rawcq-boxplot-all-groups
+#| fig.width: 11
+#| fig.height: 11
+
+treatment_order <- c("No_PolyIC_Control", "No_PolyIC_Temperature", "No_PolyIC_Mechanical",
+                      "PolyIC_Control", "PolyIC_Temperature", "PolyIC_Mechanical")
+
+rawcq_all_df <- grouped_df %>%
+  mutate(treatment_group = factor(treatment_group, levels = treatment_order))
+
+# One-way ANOVA per gene (Cq.Mean ~ treatment_group) with Tukey HSD post-hoc and
+# a Compact Letter Display (CLD) for plot annotation. `emmeans:::cld.emmGrid` is
+# called directly (rather than the `multcomp::cld()` generic) because the S3 method
+# dispatch for emmGrid objects is sensitive to package load order in some sessions.
+# Treatment-group sample sizes are unbalanced for genes with missing data (see the
+# completeness table above); `aov`/`TukeyHSD`/`emmeans` all handle unbalanced designs,
+# but statistical power is reduced for groups with few observations.
+rawcq_anova_models <- list()
+rawcq_tukey <- list()
+rawcq_cld <- data.frame()
+
+for (gene in rawcq_all_genes) {
+  gene_df <- rawcq_all_df %>% filter(Target == gene)
+  mod <- aov(Cq.Mean ~ treatment_group, data = gene_df)
+  rawcq_anova_models[[gene]] <- mod
+  rawcq_tukey[[gene]] <- TukeyHSD(mod)
+
+  emm <- emmeans(mod, ~ treatment_group)
+  cld_df <- as.data.frame(emmeans:::cld.emmGrid(emm, Letters = letters, alpha = 0.05))
+  cld_df$Target <- gene
+  cld_df$label <- trimws(cld_df$.group)
+  rawcq_cld <- rbind(rawcq_cld, cld_df[, c("Target", "treatment_group", "label")])
+}
+
+rawcq_cld <- rawcq_cld %>%
+  mutate(treatment_group = factor(treatment_group, levels = treatment_order))
+
+# Position CLD letters above the max value for each gene x treatment_group panel
+rawcq_y_range_per_gene <- rawcq_all_df %>%
+  group_by(Target) %>%
+  summarise(y_range = max(Cq.Mean, na.rm = TRUE) - min(Cq.Mean, na.rm = TRUE), .groups = "drop")
+
+rawcq_y_max_per_group <- rawcq_all_df %>%
+  group_by(Target, treatment_group) %>%
+  summarise(max_y = max(Cq.Mean, na.rm = TRUE), .groups = "drop")
+
+rawcq_cld_plot <- rawcq_cld %>%
+  left_join(rawcq_y_max_per_group, by = c("Target", "treatment_group")) %>%
+  left_join(rawcq_y_range_per_gene, by = "Target") %>%
+  mutate(y_pos = max_y + y_range * 0.08)
+
+p_rawcq_all <- rawcq_all_df %>%
+  ggplot(aes(x = treatment_group, y = Cq.Mean, fill = treatment_group)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_wrap(~Target, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values = c(
+    "No_PolyIC_Control" = "darkgray", "No_PolyIC_Temperature" = "salmon",
+    "No_PolyIC_Mechanical" = "steelblue", "PolyIC_Control" = "gray40",
+    "PolyIC_Temperature" = "firebrick", "PolyIC_Mechanical" = "navy"
+  )) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  coord_cartesian(clip = "off") +
+  theme_bw() +
+  labs(
+    title = "Raw Cq by Treatment Group (All Genes)",
+    subtitle = paste("Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter",
+                      "are not significantly different. Group sizes are unequal for genes",
+                      "with missing samples (see completeness table above)."),
+    x = "Treatment Group", y = "Raw Cq (mean of technical replicates)", fill = "Treatment Group"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
+  geom_text(data = rawcq_cld_plot, aes(x = treatment_group, y = y_pos, label = label),
+            inherit.aes = FALSE, size = 3.3, fontface = "bold", color = "darkorange")
+
+print(p_rawcq_all)
+```
+
+```{r rawcq-anova-summary-table}
+#| hold: true
+#| results: hold
+#| label: rawcq-anova-summary-table
+
+rawcq_anova_summary <- purrr::map_dfr(rawcq_all_genes, function(gene) {
+  sm <- summary(rawcq_anova_models[[gene]])[[1]]
+  data.frame(
+    Target = gene,
+    df_treatment = sm["treatment_group", "Df"],
+    F_value = sm["treatment_group", "F value"],
+    p_value = sm["treatment_group", "Pr(>F)"]
+  )
+}) %>%
+  mutate(significant = p_value <= 0.05) %>%
+  arrange(p_value)
+
+knitr::kable(rawcq_anova_summary, digits = c(0, 0, 0, 3, 6, 0),
+             caption = paste("One-way ANOVA (Cq.Mean ~ treatment_group) per gene.",
+                              "A significant result (p <= 0.05) indicates raw Cq differs",
+                              "across treatment groups -- i.e., the gene is NOT stable",
+                              "across conditions and is a poor normalizing-gene candidate."))
+```
+
+## Normalizing gene candidate ranking
+
+```{r rawcq-variation-ranking}
+#| hold: true
+#| results: hold
+#| label: rawcq-variation-ranking
+
+cat("=== Candidate normalizing genes, ranked by raw Cq coefficient of variation (CV%) ===\n\n")
+cat("All genes (lower CV = more stable raw Cq across all samples/treatments):\n\n")
+print(raw_cq_summary %>% dplyr::select(rank_CV, Target, cv_percent, sd_Cq, range_Cq, data_status),
+      row.names = FALSE)
+
+cat("\n\nOne-way ANOVA significance (raw Cq ~ treatment_group), all genes:\n\n")
+print(rawcq_anova_summary %>% dplyr::select(Target, F_value, p_value, significant),
+      row.names = FALSE)
+
+cat("\nNote: a low overall CV is necessary but not sufficient for a good normalizer --",
+    "the ANOVA results above additionally indicate whether a candidate gene's raw Cq",
+    "shifts systematically with treatment group, which would make it unsuitable for",
+    "normalization even if its overall CV is low. Genes flagged 'Incomplete' in the",
+    "summary table have unequal group sizes due to missing/QC-dropped samples, which",
+    "should be weighed when interpreting both the CV ranking and the ANOVA result.\n")
+```
+
+# Conclusion
+
+```{r normalizing-gene-conclusion}
+#| hold: true
+#| results: hold
+#| label: normalizing-gene-conclusion
+
+candidate_table <- raw_cq_summary %>%
+  dplyr::select(Target, cv_percent, data_status) %>%
+  left_join(rawcq_anova_summary %>% dplyr::select(Target, p_value, significant), by = "Target") %>%
+  arrange(cv_percent)
+
+knitr::kable(candidate_table, digits = c(0, 3, 0, 6, 0),
+             caption = paste("Candidate normalizing genes ranked by raw Cq CV%, with",
+                              "one-way ANOVA treatment-group significance (PolyIC_Control",
+                              "restricted to the 2026-10-08 run)."))
+
+stable_candidates <- candidate_table %>% filter(!significant)
+
+if (nrow(stable_candidates) > 0) {
+  best_gene <- stable_candidates$Target[1]
+  cat("\nRecommended normalizing gene:", best_gene, "\n")
+  cat("  - Lowest raw Cq CV% (", round(stable_candidates$cv_percent[1], 2),
+      "%) among genes with no significant treatment-group effect (ANOVA p =",
+      round(stable_candidates$p_value[1], 3), ")\n")
+} else {
+  cat("\nNo gene showed a non-significant treatment effect -- re-evaluate assumptions",
+      "before selecting a normalizer.\n")
+}
+```
