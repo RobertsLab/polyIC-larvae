@@ -43,14 +43,15 @@ This script identifies that normalizing gene. It:
 
 1. Loads and QCs the raw Cq data (removes NTC wells, flags high-variance technical
    replicates, removes outlier replicates).
-2. For the `PolyIC_Control` group specifically, restricts the data to the 2026-10-08
-   qPCR run (Sam's qPCR data) wherever that run exists -- see "Restrict PolyIC_Control
-   data source" below.
-3. Summarizes raw Cq per sample/gene and parses treatment-group identity from sample
-   names.
-4. Compares raw Cq distributions across all six treatment groups for each gene via
+2. Summarizes raw Cq per sample/gene and parses treatment-group identity from sample
+   names. For five genes (DNMT1, GAPDH, HSP90, VIPERIN, cGAS), `PolyIC_Control` draws
+   on two complementary qPCR runs -- an earlier run on Sam's own biological samples and
+   a 2026-10-08 run that filled in the remaining notebook samples -- and both are kept,
+   consistent with how every other treatment group already combines samples from
+   multiple runs.
+3. Compares raw Cq distributions across all six treatment groups for each gene via
    one-way ANOVA with Tukey HSD post-hoc testing.
-5. Ranks the eight candidate genes by coefficient of variation (CV%) of raw Cq, and
+4. Ranks the eight candidate genes by coefficient of variation (CV%) of raw Cq, and
    flags any gene whose raw Cq differs significantly across treatment groups.
 
 The gene identified here as the most stable, treatment-insensitive candidate is carried
@@ -179,44 +180,6 @@ qpcr_data <- map_df(file_list, function(file_info) {
            source_file = basename(file_info$url))
 })
 
-```
-
-## Restrict PolyIC_Control data source
-
-The `PolyIC_Control` (`*PC`) samples were qPCR'd more than once over the course of this
-project. Where a 2026-10-08 qPCR run (Sam's qPCR data) exists for a gene, this analysis
-uses that run for `PolyIC_Control` samples and excludes older runs for that gene. Genes
-with no 2026-10-08 rerun keep their existing `PolyIC_Control` data unchanged (there is no
-alternative source for them).
-
-```{r restrict-polyIC-control-source}
-#| hold: true
-#| results: hold
-#| label: restrict-polyIC-control-source
-
-# Genes that were re-run on 2026-10-08 for PolyIC_Control (*PC) samples
-genes_with_oct2026_pc <- qpcr_data %>%
-  filter(str_detect(Sample, "PC$"), str_detect(source_file, "^sam_2026-10-08")) %>%
-  distinct(Target) %>%
-  pull(Target)
-
-# For those genes only, drop any PolyIC_Control row not sourced from the 2026-10-08
-# run. Genes without a 2026-10-08 rerun are left untouched.
-n_before <- nrow(qpcr_data)
-
-qpcr_data <- qpcr_data %>%
-  filter(!(str_detect(Sample, "PC$") &
-           Target %in% genes_with_oct2026_pc &
-           !str_detect(source_file, "^sam_2026-10-08")))
-
-cat("PolyIC_Control rows removed (older runs, for genes with a 2026-10-08 rerun):",
-    n_before - nrow(qpcr_data), "\n\n")
-
-qpcr_data %>%
-  filter(str_detect(Sample, "PC$")) %>%
-  distinct(Target, source_file) %>%
-  arrange(Target, source_file) %>%
-  knitr::kable(caption = "PolyIC_Control data sources, by gene")
 ```
 
 # Data Cleaning
@@ -637,8 +600,7 @@ candidate_table <- raw_cq_summary %>%
 
 knitr::kable(candidate_table, digits = c(0, 3, 0, 6, 0),
              caption = paste("Candidate normalizing genes ranked by raw Cq CV%, with",
-                              "one-way ANOVA treatment-group significance (PolyIC_Control",
-                              "restricted to the 2026-10-08 run)."))
+                              "one-way ANOVA treatment-group significance."))
 
 stable_candidates <- candidate_table %>% filter(!significant)
 
