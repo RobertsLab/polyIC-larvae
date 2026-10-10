@@ -3527,7 +3527,27 @@ plot_fc <- ggplot() +
     strip.text      = element_text(face = "bold")
   ); plot_fc
 
-ggsave(plot_fc, filename = "figures/qPCR/fc_genes.png", width = 8, height = 4)
+# Resolve the project root regardless of which "Knit Directory" this document is
+# rendered with (RStudio's "Document Directory" vs "Project Directory" options both
+# knit this file successfully but start from different working directories) by
+# walking upward from the working directory until the .Rproj marker is found. This
+# avoids both a hardcoded absolute path and silently writing into the wrong location
+# (e.g. scripts/qPCR/figures/qPCR/) when knit from the document's own directory.
+find_project_root <- function(start = getwd(), marker = "polyIC-larvae.Rproj") {
+  dir <- normalizePath(start)
+  repeat {
+    if (file.exists(file.path(dir, marker))) return(dir)
+    parent <- dirname(dir)
+    if (parent == dir) {
+      stop("Could not locate project root (", marker, " not found above ", start, ").")
+    }
+    dir <- parent
+  }
+}
+
+fc_fig_dir <- file.path(find_project_root(), "figures", "qPCR")
+dir.create(fc_fig_dir, recursive = TRUE, showWarnings = FALSE)
+ggsave(plot_fc, filename = file.path(fc_fig_dir, "fc_genes.png"), width = 8, height = 4)
 ```
 
 ## Fold Change Summary Table
