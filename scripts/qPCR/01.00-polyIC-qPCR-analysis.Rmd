@@ -143,14 +143,30 @@ qpcr_data <- map_df(file_list, function(file_info) {
 
 ## Calculate delta Cq
 
-Normalized to designated normalizing gene
+Normalized to the normalizing gene identified programmatically in the "Raw Cq Variation
+Assessment for Normalizing Gene Selection" section below (`normalizing_gene`) -- no gene
+name is hand-typed here. `normalizing_gene` is required (no default), so calling this
+function before that section has run (and set the variable) fails loudly rather than
+silently falling back to a stale gene name.
+
+Unlike GAPDH (which had a complete set of samples with no missing/QC-dropped data), a
+programmatically-selected normalizing gene is not guaranteed to have been measured for
+every sample -- some normalizer candidates have missing or QC-dropped values for a subset
+of samples (see the completeness table above). For any sample where the normalizing gene
+has no valid `Cq.Mean`, there is nothing to subtract, so `delta_Cq` is set to `NA` for
+every target in that sample rather than erroring; those rows are then dropped explicitly
+in the `calculate-delta-cq` chunk below, with a count of how many sample-gene
+combinations were lost this way.
 ```{r function-delta-Cq}
 #| hold: true
 #| label: function-delta-Cq
-calculate_delta_Cq <- function(df) {
+calculate_delta_Cq <- function(df, normalizing_gene) {
   df <- df %>%
     group_by(Sample) %>%
-    mutate(delta_Cq = Cq.Mean - Cq.Mean[Target == "GAPDH"]) %>%
+    mutate(delta_Cq = {
+      norm_Cq <- Cq.Mean[Target == normalizing_gene]
+      if (length(norm_Cq) == 1) Cq.Mean - norm_Cq else NA_real_
+    }) %>%
     ungroup()
   
   return(df)
@@ -436,8 +452,8 @@ knitr::kable(raw_cq_summary, digits = 3,
 ```{r rawcq-boxplot-all-groups}
 #| hold: true
 #| label: rawcq-boxplot-all-groups
-#| fig.width: 11
-#| fig.height: 11
+#| fig.width: 10
+#| fig.height: 14
 
 treatment_order <- c("No_PolyIC_Control", "No_PolyIC_Temperature", "No_PolyIC_Mechanical",
                       "PolyIC_Control", "PolyIC_Temperature", "PolyIC_Mechanical")
@@ -486,29 +502,47 @@ rawcq_cld_plot <- rawcq_cld %>%
   left_join(rawcq_y_range_per_gene, by = "Target") %>%
   mutate(y_pos = max_y + y_range * 0.08)
 
+# Colorblind-safe palette (Okabe-Ito categorical set). Control and Temperature
+# are threaded by hue family (sky-blue/blue, orange/vermillion: No_PolyIC = the
+# lighter member of the pair, PolyIC = the more saturated member); Mechanical
+# uses two distinct Okabe-Ito hues rather than a lightness pair, since a
+# lightened/darkened single-hue pair collapsed under simulated tritanopia.
+# Verified via colorspace::deutan()/protan()/tritan() simulation + CIE Lab
+# distance: minimum pairwise Delta-E across all three CVD types is 16.2 (well
+# above the ~10 just-noticeable-difference threshold).
+treatment_palette <- c(
+  "No_PolyIC_Control" = "#56B4E9", "No_PolyIC_Temperature" = "#E69F00",
+  "No_PolyIC_Mechanical" = "#009E73", "PolyIC_Control" = "#0072B2",
+  "PolyIC_Temperature" = "#D55E00", "PolyIC_Mechanical" = "#CC79A7"
+)
+
 p_rawcq_all <- rawcq_all_df %>%
   ggplot(aes(x = treatment_group, y = Cq.Mean, fill = treatment_group)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.85) +
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
-  facet_wrap(~Target, scales = "free_y", ncol = 3) +
-  scale_fill_manual(values = c(
-    "No_PolyIC_Control" = "darkgray", "No_PolyIC_Temperature" = "salmon",
-    "No_PolyIC_Mechanical" = "steelblue", "PolyIC_Control" = "gray40",
-    "PolyIC_Temperature" = "firebrick", "PolyIC_Mechanical" = "navy"
-  )) +
+  facet_wrap(~Target, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = treatment_palette) +
+  scale_x_discrete(labels = function(x) str_wrap(gsub("_", " ", x), width = 9)) +
   scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
   coord_cartesian(clip = "off") +
-  theme_bw() +
+  theme_bw(base_size = 11) +
   labs(
     title = "Raw Cq by Treatment Group (All Genes)",
-    subtitle = paste("Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter",
-                      "are not significantly different. Group sizes are unequal for genes",
-                      "with missing samples (see completeness table above)."),
+    subtitle = paste(strwrap(
+      paste("Letters show Tukey HSD groupings (p \u2264 0.05); groups sharing a letter",
+            "are not significantly different."),
+      width = 95), collapse = "\n"),
+    caption = paste(strwrap(
+      paste("Group sizes are unequal for genes with missing samples or QC-dropped",
+            "replicates (see completeness table above)."),
+      width = 110), collapse = "\n"),
     x = "Treatment Group", y = "Raw Cq (mean of technical replicates)", fill = "Treatment Group"
   ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1, size = 7.5, lineheight = 0.85),
+        plot.caption = element_text(hjust = 0, size = 8, color = "gray40"),
+        legend.position = "bottom") +
   geom_text(data = rawcq_cld_plot, aes(x = treatment_group, y = y_pos, label = label),
-            inherit.aes = FALSE, size = 3.3, fontface = "bold", color = "darkorange")
+            inherit.aes = FALSE, size = 3.3, fontface = "bold", color = "black")
 
 print(p_rawcq_all)
 ```
@@ -553,12 +587,81 @@ cat("\n\nOne-way ANOVA significance (raw Cq ~ treatment_group), all genes:\n\n")
 print(rawcq_anova_summary %>% dplyr::select(Target, F_value, p_value, significant),
       row.names = FALSE)
 
-cat("\nNote: a low overall CV is necessary but not sufficient for a good normalizer --",
-    "the ANOVA results above additionally indicate whether a candidate gene's raw Cq",
-    "shifts systematically with treatment group, which would make it unsuitable for",
-    "normalization even if its overall CV is low. Genes flagged 'Incomplete' in the",
-    "summary table have unequal group sizes due to missing/QC-dropped samples, which",
-    "should be weighed when interpreting both the CV ranking and the ANOVA result.\n")
+cat("\nNote: the CV ranking above and the ANOVA results above are two SEPARATE criteria,",
+    "shown here side by side but not yet combined. A low overall CV is necessary but not",
+    "sufficient for a good normalizer -- a gene can have a low CV (little raw variation",
+    "overall) while still shifting systematically with treatment group (a significant",
+    "ANOVA), which would make it unsuitable for normalization despite its low CV. This is",
+    "exactly what happens below: the gene with the single lowest CV in this list is",
+    "EXCLUDED in the Conclusion because its ANOVA is significant. The Conclusion section",
+    "combines both criteria into one ranking -- see that table for the actual decision.",
+    "Genes flagged 'Incomplete' have unequal group sizes due to missing/QC-dropped",
+    "samples, which should be weighed when interpreting both criteria.\n")
+```
+
+# Conclusion
+
+```{r normalizing-gene-conclusion}
+#| hold: true
+#| results: hold
+#| label: normalizing-gene-conclusion
+
+# Combine both selection criteria into a single ranking. A candidate normalizing
+# gene must first be STABLE across treatment groups (ANOVA p > 0.05 -- its Cq does
+# not shift with condition); only among stable genes does a lower CV% make it a
+# better choice. Sorting by `significant` before `cv_percent` means all stable
+# ("Candidate") genes are ranked first by CV%, followed by all excluded genes --
+# so the #1 row in this table is always the recommendation, and a gene with a
+# lower raw CV% but a significant treatment effect (e.g. GAPDH) is correctly
+# pushed below the stable candidates rather than appearing to outrank them.
+candidate_table <- raw_cq_summary %>%
+  dplyr::select(Target, cv_percent, data_status) %>%
+  left_join(rawcq_anova_summary %>% dplyr::select(Target, p_value, significant), by = "Target") %>%
+  mutate(
+    verdict = ifelse(significant,
+                      "Excluded \u2014 Cq shifts with treatment",
+                      "Candidate \u2014 Cq stable across treatments")
+  ) %>%
+  arrange(significant, cv_percent) %>%
+  mutate(rank = row_number(), recommended = "", .before = Target)
+
+best_row <- which(!candidate_table$significant)[1]
+if (!is.na(best_row)) candidate_table$recommended[best_row] <- "\u2b50"
+
+display_table <- candidate_table %>%
+  dplyr::select(rank, recommended, Target, cv_percent, data_status, p_value, verdict) %>%
+  rename(
+    Rank = rank, ` ` = recommended, Gene = Target, `Raw Cq CV (%)` = cv_percent,
+    `Data completeness` = data_status, `ANOVA p (Cq ~ treatment)` = p_value,
+    `Verdict` = verdict
+  )
+
+knitr::kable(display_table, digits = c(0, 0, 0, 2, 0, 4, 0),
+             caption = paste("Candidate normalizing genes, ranked by suitability: stable genes",
+                              "(no significant treatment effect) first, ordered by raw Cq CV% low",
+                              "to high; excluded genes (significant treatment effect) follow, also",
+                              "ordered by CV%. Rank 1 is the recommended normalizer."))
+
+if (!is.na(best_row)) {
+  best_gene <- candidate_table$Target[best_row]
+  cat("\nRecommended normalizing gene:", best_gene, "\n")
+  cat("  - Lowest raw Cq CV% (", round(candidate_table$cv_percent[best_row], 2),
+      "%) among genes with no significant treatment-group effect (ANOVA p =",
+      round(candidate_table$p_value[best_row], 3), ")\n")
+} else {
+  stop("No gene showed a non-significant treatment effect across treatment groups -- ",
+       "re-evaluate QC/assumptions before selecting a normalizer. Cannot proceed with ",
+       "delta-Cq normalization below without a stable reference gene.")
+}
+
+# `normalizing_gene` is THE single source of truth for every downstream section of this
+# document (delta-Cq calculation, "genes of interest" filtering, ANOVA models, and the
+# per-gene diagnostic subsections). It is derived programmatically from the ranking above
+# -- never hand-typed -- so re-running this analysis on updated data will automatically
+# propagate a different normalizer choice through the rest of the script.
+normalizing_gene <- best_gene
+cat("\n`normalizing_gene` set to:", normalizing_gene,
+    "-- used programmatically throughout the rest of this document.\n")
 ```
 
 # Calculate Delta Cq
@@ -566,13 +669,25 @@ cat("\nNote: a low overall CV is necessary but not sufficient for a good normali
 ```{r calculate-delta-cq}
 #| hold: true
 #| label: calculate-delta-cq
-# Calculate delta Cq by subtracting GAPDH Cq.Mean from each corresponding Sample Cq.Mean
-delta_Cq_df <- calculate_delta_Cq(grouped_df)
+# Calculate delta Cq by subtracting the programmatically-identified normalizing gene's
+# Cq.Mean from each corresponding Sample Cq.Mean (see `normalizing_gene` above)
+delta_Cq_df <- calculate_delta_Cq(grouped_df, normalizing_gene)
 
-# Filter out normalizing gene (GAPDH), since no need to compare normalizing gene to itself
+# Samples where the normalizing gene has no valid Cq.Mean (missing or QC-dropped) cannot
+# be normalized -- calculate_delta_Cq() marks these rows NA_real_ rather than erroring.
+# Drop them here and report how many sample-gene combinations were lost, since the
+# normalizing gene is no longer guaranteed to have complete coverage the way GAPDH did.
+n_before <- nrow(delta_Cq_df)
 delta_Cq_df <- delta_Cq_df %>%
-  filter(Target != "GAPDH")
+  filter(!is.na(delta_Cq))
+n_dropped <- n_before - nrow(delta_Cq_df)
 
+# Filter out the normalizing gene itself, since no need to compare it to itself
+delta_Cq_df <- delta_Cq_df %>%
+  filter(Target != normalizing_gene)
+
+cat("Normalizing gene used:", normalizing_gene, "\n")
+cat("Rows dropped for missing", normalizing_gene, "measurement:", n_dropped, "\n\n")
 str(delta_Cq_df)
 ```
 
@@ -700,75 +815,75 @@ cat("  Total unique samples with issues: ", length(all_problematic_samples), "\n
 cat("  All unique sample names (failed QC + missing): ", paste(sort(all_problematic_samples), collapse = ", "), "\n", sep = "")
 ```
 
-# GAPDH Impact Analysis
+# Normalizing Gene Impact Analysis
 
-```{r gapdh-impact-analysis}
+```{r normalizing-gene-impact-analysis}
 #| hold: true
 #| results: hold
-#| label: gapdh-impact-analysis
+#| label: normalizing-gene-impact-analysis
 
-cat("\n=== GAPDH QC FAILURES AND THEIR CASCADE EFFECTS ===\n\n")
+cat("\n=== ", toupper(normalizing_gene), " QC FAILURES AND THEIR CASCADE EFFECTS ===\n\n", sep = "")
 
-# Get samples where GAPDH passed QC
-gapdh_passed <- grouped_df %>%
-  filter(Target == "GAPDH") %>%
+# Get samples where the normalizing gene passed QC
+normalizer_passed <- grouped_df %>%
+  filter(Target == normalizing_gene) %>%
   dplyr::select(Sample) %>%
   distinct() %>%
   pull(Sample)
 
-# Get samples where genes of interest passed QC
+# Get samples where genes of interest (everything except the normalizer) passed QC
 genes_of_interest <- grouped_df %>%
-  filter(Target != "GAPDH") %>%
+  filter(Target != normalizing_gene) %>%
   dplyr::select(Sample, Target) %>%
   distinct()
 
-# Find samples that have gene data but missing GAPDH
-samples_with_gene_but_no_gapdh <- genes_of_interest %>%
-  filter(!Sample %in% gapdh_passed) %>%
+# Find samples that have gene data but missing the normalizing gene
+samples_with_gene_but_no_normalizer <- genes_of_interest %>%
+  filter(!Sample %in% normalizer_passed) %>%
   arrange(Sample, Target)
 
-if(nrow(samples_with_gene_but_no_gapdh) > 0) {
-  cat("**Samples with good gene measurements but failed/missing GAPDH:**\n")
+if(nrow(samples_with_gene_but_no_normalizer) > 0) {
+  cat("**Samples with good gene measurements but failed/missing", normalizing_gene, ":**\n")
   cat("(These samples CANNOT be normalized and are excluded from analysis)\n\n")
   
   # Count by sample
-  sample_counts <- samples_with_gene_but_no_gapdh %>%
+  sample_counts <- samples_with_gene_but_no_normalizer %>%
     group_by(Sample) %>%
     summarise(n_genes_lost = n(), .groups = "drop") %>%
     arrange(desc(n_genes_lost), Sample)
   
   cat("Total samples affected:", nrow(sample_counts), "\n")
-  cat("Total gene measurements lost:", nrow(samples_with_gene_but_no_gapdh), "\n\n")
+  cat("Total gene measurements lost:", nrow(samples_with_gene_but_no_normalizer), "\n\n")
   
   # Detailed breakdown
   for(i in 1:nrow(sample_counts)) {
     samp <- sample_counts$Sample[i]
-    genes_lost <- samples_with_gene_but_no_gapdh %>%
+    genes_lost <- samples_with_gene_but_no_normalizer %>%
       filter(Sample == samp) %>%
       pull(Target)
     cat("  ", samp, " (", sample_counts$n_genes_lost[i], " genes lost): ", 
         paste(genes_lost, collapse = ", "), "\n", sep = "")
   }
 } else {
-  cat("**Good news!** All samples with gene measurements also have valid GAPDH.\n")
+  cat("**Good news!** All samples with gene measurements also have valid", normalizing_gene, ".\n")
 }
 
-# Check if GAPDH itself failed QC for any samples
-gapdh_failed_qc <- excluded_samples %>%
-  filter(Target == "GAPDH") %>%
+# Check if the normalizing gene itself failed QC for any samples
+normalizer_failed_qc <- excluded_samples %>%
+  filter(Target == normalizing_gene) %>%
   pull(Sample) %>%
   unique()
 
-if(length(gapdh_failed_qc) > 0) {
-  cat("\n\n**GAPDH samples that failed QC (Std Dev > 0.5):** ", length(gapdh_failed_qc), " samples\n", sep = "")
-  cat("  ", paste(sort(gapdh_failed_qc), collapse = ", "), "\n", sep = "")
-  cat("\nNote: These GAPDH failures prevent normalization for ALL genes in these samples,\n")
+if(length(normalizer_failed_qc) > 0) {
+  cat("\n\n**", normalizing_gene, " samples that failed QC (Std Dev > 0.5):** ", length(normalizer_failed_qc), " samples\n", sep = "")
+  cat("  ", paste(sort(normalizer_failed_qc), collapse = ", "), "\n", sep = "")
+  cat("\nNote: These", normalizing_gene, "failures prevent normalization for ALL genes in these samples,\n")
   cat("even if those genes had good quality measurements.\n")
 } else {
-  cat("\n\n**No GAPDH samples failed QC.**\n")
+  cat("\n\n**No", normalizing_gene, "samples failed QC.**\n")
 }
 
-# Identify which "missing" samples in the final analysis are due to GAPDH issues
+# Identify which "missing" samples in the final analysis are due to normalizing-gene issues
 cat("\n\n**Analysis of 'Missing' Samples:**\n\n")
 
 # Get samples that made it to grouped_df (passed initial QC)
@@ -776,28 +891,30 @@ all_passed_qc <- grouped_df %>%
   dplyr::select(Sample, Target) %>%
   distinct()
 
-# For each "missing" sample in delta_Cq_df, check if the gene passed QC but GAPDH didn't
-missing_due_to_gapdh <- missing_combinations %>%
+# For each "missing" sample in delta_Cq_df, check if the gene passed QC but the
+# normalizing gene didn't
+missing_due_to_normalizer <- missing_combinations %>%
   inner_join(all_passed_qc, by = c("Sample", "Target")) %>%
-  filter(!Sample %in% gapdh_passed)
+  filter(!Sample %in% normalizer_passed)
 
-if(nrow(missing_due_to_gapdh) > 0) {
-  cat("Gene measurements lost due to GAPDH failure/missing: ", nrow(missing_due_to_gapdh), " sample-gene combinations\n\n", sep = "")
+if(nrow(missing_due_to_normalizer) > 0) {
+  cat("Gene measurements lost due to ", normalizing_gene, " failure/missing: ", nrow(missing_due_to_normalizer), " sample-gene combinations\n\n", sep = "")
   
-  missing_gapdh_summary <- missing_due_to_gapdh %>%
+  missing_normalizer_summary <- missing_due_to_normalizer %>%
     group_by(Target) %>%
     summarise(n = n(), .groups = "drop") %>%
     arrange(desc(n))
   
   cat("Breakdown by gene:\n")
-  for(i in 1:nrow(missing_gapdh_summary)) {
-    cat("  ", missing_gapdh_summary$Target[i], ": ", missing_gapdh_summary$n[i], " samples\n", sep = "")
+  for(i in 1:nrow(missing_normalizer_summary)) {
+    cat("  ", missing_normalizer_summary$Target[i], ": ", missing_normalizer_summary$n[i], " samples\n", sep = "")
   }
 } else {
-  cat("None of the 'missing' samples are due to GAPDH QC failures.\n")
+  cat("None of the 'missing' samples are due to", normalizing_gene, "QC failures.\n")
   cat("(They were never run/loaded for those genes)\n")
 }
 ```
+
 
 # Statistical Comparisons
 
@@ -1038,12 +1155,13 @@ if(any(summary(model_hsp70)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
   emm_hsp70 <- emmeans(model_hsp70, ~ polyIC * stress_type)
 }
 
-# HSP90
-model_hsp90 <- delta_Cq_df %>%
-  filter(Target == "HSP90") %>%
+# GAPDH (gene of interest here -- HSP90 is the normalizer and is excluded from
+# delta_Cq_df, so it is no longer one of the modeled genes)
+model_gapdh <- delta_Cq_df %>%
+  filter(Target == "GAPDH") %>%
   aov(delta_Cq ~ polyIC * stress_type, data = .)
-if(any(summary(model_hsp90)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
-  emm_hsp90 <- emmeans(model_hsp90, ~ polyIC * stress_type)
+if(any(summary(model_gapdh)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_gapdh <- emmeans(model_gapdh, ~ polyIC * stress_type)
 }
 
 # cGAS
@@ -1064,6 +1182,18 @@ if(any(summary(model_viperin)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
 
 cat("ANOVA models created for all genes. Emmeans objects stored for post-hoc testing and plotting.\n")
 cat("See 'ANOVA Results and Diagnostics' section below for detailed results, assumption checks, and interpretations.\n")
+
+# Report which genes had at least one significant term (polyIC, stress_type, or their
+# interaction) -- these are the genes for which an emmeans object was created above.
+# This list is derived programmatically from the models just run (never hand-typed), since
+# it necessarily changes when the normalizing gene changes.
+all_genes_of_interest <- c("ATP.Synthase", "Citrate.Synthase", "DNMT1", "GAPDH",
+                            "HSP70", "cGAS", "VIPERIN")
+emm_var_names <- c(ATP.Synthase = "emm_atp", Citrate.Synthase = "emm_citrate",
+                   DNMT1 = "emm_dnmt1", GAPDH = "emm_gapdh", HSP70 = "emm_hsp70",
+                   cGAS = "emm_cgas", VIPERIN = "emm_viperin")
+significant_genes <- all_genes_of_interest[sapply(emm_var_names[all_genes_of_interest], exists)]
+cat("\nGenes with >=1 significant ANOVA term (p < 0.05):", paste(significant_genes, collapse = ", "), "\n")
 ```
 
 # Visualizations
@@ -1328,51 +1458,23 @@ print(p)
 #| fig.width: 12
 #| fig.height: 8
 
-# Use emmeans objects created in Statistical Comparisons section
+# Use emmeans objects created in the "Create ANOVA Models" section above.
+# Loop generically over `significant_genes` (the genes with >=1 significant ANOVA term,
+# derived programmatically there) rather than a hand-picked gene list, since that list
+# changes whenever the normalizing gene changes.
 all_treat_annotations <- data.frame()
 
-# ATP Synthase
-if(exists("emm_atp")) {
-  cld_temp <- cld(emm_atp, Letters = letters, alpha = 0.05)
-  cld_df <- as.data.frame(cld_temp)
-  cld_df$Target <- "ATP.Synthase"
-  cld_df$label <- trimws(cld_df$.group)
-  cld_df$treatment_group <- paste(cld_df$polyIC, cld_df$stress_type, sep = "_")
-  all_treat_annotations <- rbind(all_treat_annotations, 
-                                 cld_df[, c("Target", "treatment_group", "label")])
-}
-
-# HSP70
-if(exists("emm_hsp70")) {
-  cld_temp <- cld(emm_hsp70, Letters = letters, alpha = 0.05)
-  cld_df <- as.data.frame(cld_temp)
-  cld_df$Target <- "HSP70"
-  cld_df$label <- trimws(cld_df$.group)
-  cld_df$treatment_group <- paste(cld_df$polyIC, cld_df$stress_type, sep = "_")
-  all_treat_annotations <- rbind(all_treat_annotations, 
-                                 cld_df[, c("Target", "treatment_group", "label")])
-}
-
-# HSP90
-if(exists("emm_hsp90")) {
-  cld_temp <- cld(emm_hsp90, Letters = letters, alpha = 0.05)
-  cld_df <- as.data.frame(cld_temp)
-  cld_df$Target <- "HSP90"
-  cld_df$label <- trimws(cld_df$.group)
-  cld_df$treatment_group <- paste(cld_df$polyIC, cld_df$stress_type, sep = "_")
-  all_treat_annotations <- rbind(all_treat_annotations, 
-                                 cld_df[, c("Target", "treatment_group", "label")])
-}
-
-# VIPERIN
-if(exists("emm_viperin")) {
-  cld_temp <- cld(emm_viperin, Letters = letters, alpha = 0.05)
-  cld_df <- as.data.frame(cld_temp)
-  cld_df$Target <- "VIPERIN"
-  cld_df$label <- trimws(cld_df$.group)
-  cld_df$treatment_group <- paste(cld_df$polyIC, cld_df$stress_type, sep = "_")
-  all_treat_annotations <- rbind(all_treat_annotations, 
-                                 cld_df[, c("Target", "treatment_group", "label")])
+for (gene in significant_genes) {
+  emm_var <- emm_var_names[[gene]]
+  if (exists(emm_var)) {
+    cld_temp <- cld(get(emm_var), Letters = letters, alpha = 0.05)
+    cld_df <- as.data.frame(cld_temp)
+    cld_df$Target <- gene
+    cld_df$label <- trimws(cld_df$.group)
+    cld_df$treatment_group <- paste(cld_df$polyIC, cld_df$stress_type, sep = "_")
+    all_treat_annotations <- rbind(all_treat_annotations,
+                                   cld_df[, c("Target", "treatment_group", "label")])
+  }
 }
 
 # Calculate y positions if annotations exist
@@ -2083,21 +2185,21 @@ if(levene_p > 0.05) {
 }
 ```
 
-## HSP90
+## GAPDH
 
-Heat shock protein 90 (Hsp90) is a molecular chaperone that helps proteins fold, mature, and remain active. Hsp90 also helps regulate signaling networks and is involved in many cellular processes.
+Glyceraldehyde-3-phosphate dehydrogenase (GAPDH) is a glycolytic enzyme commonly used as a reference/housekeeping gene in qPCR studies. It is evaluated here as a gene of interest because it was the previous normalizing-gene candidate but was excluded from that role (see the Normalizing Gene Candidate Ranking section) after showing a significant treatment effect in the raw-Cq ANOVA.
 
-```{r anova-hsp90}
+```{r anova-gapdh}
 #| hold: true
-#| label: anova-hsp90
-model_hsp90 <- delta_Cq_df %>%
-  filter(Target == "HSP90") %>%
+#| label: anova-gapdh
+model_gapdh <- delta_Cq_df %>%
+  filter(Target == "GAPDH") %>%
   aov(delta_Cq ~ polyIC * stress_type, data = .)
 
-summary(model_hsp90)
+summary(model_gapdh)
 ```
 
-### Assumption Checks for HSP90
+### Assumption Checks for GAPDH
 
 **QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
 
@@ -2106,10 +2208,10 @@ summary(model_hsp90)
 - **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
 - **Minor deviations** at the ends are usually acceptable
 
-```{r anova-hsp90-qq}
+```{r anova-gapdh-qq}
 #| hold: true
-#| label: anova-hsp90-qq
-qqPlot(model_hsp90$residuals)
+#| label: anova-gapdh-qq
+qqPlot(model_gapdh$residuals)
 ```
 
 **Levene's Test**: Tests homogeneity of variance (equal variances across groups).
@@ -2118,23 +2220,23 @@ qqPlot(model_hsp90$residuals)
 - **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
 - **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
 
-```{r anova-hsp90-levene}
+```{r anova-gapdh-levene}
 #| results: hold
-#| label: anova-hsp90-levene
-leveneTest(model_hsp90$residuals ~ polyIC * stress_type, 
-           data = delta_Cq_df %>% filter(Target == "HSP90"))
+#| label: anova-gapdh-levene
+leveneTest(model_gapdh$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "GAPDH"))
 
 # If significant effects found, run post-hoc tests
-if(any(summary(model_hsp90)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
-  emm_hsp90 <- emmeans(model_hsp90, ~ polyIC * stress_type)
-  pairs_hsp90 <- pairs(emm_hsp90)
-  print(pairs_hsp90)
+if(any(summary(model_gapdh)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_gapdh <- emmeans(model_gapdh, ~ polyIC * stress_type)
+  pairs_gapdh <- pairs(emm_gapdh)
+  print(pairs_gapdh)
   
   # Identify significant contrasts
-  pairs_df <- as.data.frame(pairs_hsp90)
+  pairs_df <- as.data.frame(pairs_gapdh)
   sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
   
-  cat("\n**HSP90 - Pairwise Contrast Summary:**\n\n")
+  cat("\n**GAPDH - Pairwise Contrast Summary:**\n\n")
   if(nrow(sig_contrasts) > 0) {
     cat("Significant contrasts (p ≤ 0.05):\n")
     for(i in 1:nrow(sig_contrasts)) {
@@ -2148,21 +2250,21 @@ if(any(summary(model_hsp90)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
 }
 ```
 
-### HSP90 ANOVA Interpretation
+### GAPDH ANOVA Interpretation
 
-```{r anova-hsp90-interpret}
+```{r anova-gapdh-interpret}
 #| hold: true
 #| results: hold
-#| label: anova-hsp90-interpret
-anova_results <- summary(model_hsp90)[[1]]
+#| label: anova-gapdh-interpret
+anova_results <- summary(model_gapdh)[[1]]
 # Fix: Trim whitespace from rownames
 rownames(anova_results) <- trimws(rownames(anova_results))
 
-levene_results <- leveneTest(model_hsp90$residuals ~ polyIC * stress_type, 
-                              data = delta_Cq_df %>% filter(Target == "HSP90"))
+levene_results <- leveneTest(model_gapdh$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "GAPDH"))
 
-cat("**HSP90 ANOVA Results:**\n\n")
-cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect HSP90 expression (delta Cq).\n\n")
+cat("**GAPDH ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect GAPDH expression (delta Cq).\n\n")
 
 cat("**Treatment Effects (ANOVA):**\n\n")
 
@@ -2440,44 +2542,19 @@ Visualize delta Cq values by treatment group for each target.
 
 cld_annotations <- data.frame()
 
-# ATP Synthase
-if(exists("emm_atp")) {
-  cld_atp <- cld(emm_atp, Letters = letters, alpha = 0.05)
-  cld_atp_df <- as.data.frame(cld_atp)
-  cld_atp_df$Target <- "ATP.Synthase"
-  cld_atp_df$label <- trimws(cld_atp_df$.group)
-  cld_atp_df <- cld_atp_df[, c("Target", "polyIC", "stress_type", "label")]
-  cld_annotations <- rbind(cld_annotations, cld_atp_df)
-}
-
-# HSP70
-if(exists("emm_hsp70")) {
-  cld_hsp70 <- cld(emm_hsp70, Letters = letters, alpha = 0.05)
-  cld_hsp70_df <- as.data.frame(cld_hsp70)
-  cld_hsp70_df$Target <- "HSP70"
-  cld_hsp70_df$label <- trimws(cld_hsp70_df$.group)
-  cld_hsp70_df <- cld_hsp70_df[, c("Target", "polyIC", "stress_type", "label")]
-  cld_annotations <- rbind(cld_annotations, cld_hsp70_df)
-}
-
-# HSP90
-if(exists("emm_hsp90")) {
-  cld_hsp90 <- cld(emm_hsp90, Letters = letters, alpha = 0.05)
-  cld_hsp90_df <- as.data.frame(cld_hsp90)
-  cld_hsp90_df$Target <- "HSP90"
-  cld_hsp90_df$label <- trimws(cld_hsp90_df$.group)
-  cld_hsp90_df <- cld_hsp90_df[, c("Target", "polyIC", "stress_type", "label")]
-  cld_annotations <- rbind(cld_annotations, cld_hsp90_df)
-}
-
-# VIPERIN
-if(exists("emm_viperin")) {
-  cld_viperin <- cld(emm_viperin, Letters = letters, alpha = 0.05)
-  cld_viperin_df <- as.data.frame(cld_viperin)
-  cld_viperin_df$Target <- "VIPERIN"
-  cld_viperin_df$label <- trimws(cld_viperin_df$.group)
-  cld_viperin_df <- cld_viperin_df[, c("Target", "polyIC", "stress_type", "label")]
-  cld_annotations <- rbind(cld_annotations, cld_viperin_df)
+# Loop generically over `significant_genes` (derived programmatically in the
+# "Create ANOVA Models" section above) rather than a hand-picked gene list, since
+# that list changes whenever the normalizing gene changes.
+for (gene in significant_genes) {
+  emm_var <- emm_var_names[[gene]]
+  if (exists(emm_var)) {
+    cld_gene <- cld(get(emm_var), Letters = letters, alpha = 0.05)
+    cld_gene_df <- as.data.frame(cld_gene)
+    cld_gene_df$Target <- gene
+    cld_gene_df$label <- trimws(cld_gene_df$.group)
+    cld_gene_df <- cld_gene_df[, c("Target", "polyIC", "stress_type", "label")]
+    cld_annotations <- rbind(cld_annotations, cld_gene_df)
+  }
 }
 
 # Calculate y positions for annotations (above max values)
@@ -2526,7 +2603,7 @@ if(nrow(cld_annotations) > 0) {
               position = position_dodge(0.8), size = 4, vjust = 0, 
               color = "darkorange", fontface = "bold") +
     labs(subtitle = "Letters show statistical groupings (p ≤ 0.05). Groups sharing a letter are NOT significantly different from each other",
-         caption = "Compact Letter Display shown for: ATP Synthase, HSP70, HSP90, and VIPERIN. See individual ANOVA sections for detailed p-values.")
+         caption = paste0("Compact Letter Display shown for: ", paste(significant_genes, collapse = ", "), ". See individual ANOVA sections for detailed p-values."))
 }
 
 print(p)
@@ -2595,7 +2672,7 @@ if(nrow(cld_plot) > 0) {
     ) +
     labs(
       subtitle = "Letters show statistical groupings (p ≤ 0.05). Groups sharing a letter are NOT significantly different.",
-      caption = "Compact Letter Display shown for: ATP Synthase, HSP70, HSP90, and VIPERIN."
+      caption = paste0("Compact Letter Display shown for: ", paste(significant_genes, collapse = ", "), ".")
     )
 }
 
@@ -2801,7 +2878,7 @@ plot(model, 4)
 
 Meets assumptions. Difference between PolyIC treatments and lower at elevated temperature, no interactive effects. 
 
-## HSP90
+## GAPDH
 
 Run ANOVA analyses and check assumptions 
 
@@ -2809,7 +2886,7 @@ Plot raw data
 
 ```{r}
 plot5<-data%>%
-  filter(Target=="HSP90")%>%
+  filter(Target=="GAPDH")%>%
   
   ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
   geom_boxplot()+
@@ -2819,7 +2896,7 @@ plot5<-data%>%
 plot5
 
 data%>%
-  filter(Target=="HSP90")%>%
+  filter(Target=="GAPDH")%>%
   
   ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
   geom_boxplot()+
@@ -2829,7 +2906,7 @@ data%>%
 
 ```{r}
 model<-data%>%
-  filter(Target=="HSP90")%>%
+  filter(Target=="GAPDH")%>%
   
   aov(delta_Cq~polyIC*stress_type, data=.)
 
@@ -2844,7 +2921,7 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions. Difference between PolyIC treatments. 
+Meets assumptions (Levene's p = 0.98). Significant difference between PolyIC treatments (p < 0.0001 at Control, p < 0.0001 at Temperature); no significant stress-type effect and no interaction -- the PolyIC effect is consistent across temperatures.
 
 ## VIPERIN
 
@@ -2937,7 +3014,49 @@ Meets assumptions. No effect.
 
 ## Rationale
 
-HSP70, HSP90, and VIPERIN showed statistically significant differences between PolyIC treatments in the ANOVAs above. However, the PolyIC_Control group has unequal sample sizes compared to other groups (HSP70: n=18; HSP90 and VIPERIN: n=8) because a subset of samples were never run on those qPCR plates. To verify that these significant results are not an artifact of unequal sample sizes — and would hold even with balanced, reduced data — we perform a randomized downsampling analysis.
+```{r downsample-rationale-text}
+#| hold: true
+#| results: asis
+#| label: downsample-rationale-text
+#| echo: false
+
+# Build the rationale paragraph programmatically from `significant_genes` (computed in
+# "Create ANOVA Models" above) and the real per-group sample sizes, rather than
+# hand-typing a gene list and sample-size figures that go stale whenever the
+# normalizing gene -- and therefore the set of significant genes -- changes.
+genes_to_test <- significant_genes
+
+group_n_by_gene <- data %>%
+  filter(Target %in% genes_to_test) %>%
+  group_by(Target, polyIC, stress_type) %>%
+  summarise(n = sum(!is.na(delta_Cq)), .groups = "drop")
+
+min_n_by_gene <- group_n_by_gene %>%
+  group_by(Target) %>%
+  summarise(min_n = min(n), max_n = max(n), .groups = "drop")
+
+# Group genes by their (min_n, max_n) pair so genes sharing the same sample-size
+# pattern are reported together (mirrors how the old hand-written prose grouped them)
+size_groups <- min_n_by_gene %>%
+  group_by(min_n, max_n) %>%
+  summarise(genes = paste(Target, collapse = ", "), .groups = "drop")
+
+size_sentence <- paste(
+  paste0(size_groups$genes, ": n=", size_groups$min_n,
+         " in the smallest group (vs. n=", size_groups$max_n, " elsewhere)"),
+  collapse = "; "
+)
+
+cat(paste0(
+  paste(genes_to_test, collapse = ", "),
+  " showed statistically significant differences between PolyIC treatments in the ANOVAs above. ",
+  "However, the PolyIC_Control group has unequal sample sizes compared to other groups (",
+  size_sentence,
+  ") because a subset of samples were never run on those qPCR plates. ",
+  "To verify that these significant results are not an artifact of unequal sample sizes -- ",
+  "and would hold even with balanced, reduced data -- we perform a randomized downsampling analysis.\n"
+))
+```
 
 **Approach:** For each gene, we identify the minimum sample size present in any treatment group. We then randomly subsample that number of observations from every group, run the two-way ANOVA (`delta_Cq ~ polyIC * stress_type`), and record the p-values for each model term. This is repeated 1,000 times. The proportion of iterations yielding p < 0.05 for each term indicates whether the significance is robust to sample size reduction.
 
@@ -2948,7 +3067,6 @@ HSP70, HSP90, and VIPERIN showed statistically significant differences between P
 
 set.seed(42)
 n_iter <- 1000
-genes_to_test <- c("HSP70", "HSP90", "VIPERIN")
 
 # Run downsampling for a single gene and return a data frame of p-values
 run_downsampling <- function(gene_name, df, n_iterations = 1000) {
@@ -3105,6 +3223,16 @@ sig_labels <- downsample_long %>%
     .groups = "drop"
   )
 
+# Build the "downsampled to n=X" subtitle fragment programmatically from the min_n
+# values recorded per gene in `downsample_results`, rather than hand-typing them.
+min_n_fragment <- downsample_results %>%
+  distinct(gene, min_n) %>%
+  group_by(min_n) %>%
+  summarise(genes = paste(gene, collapse = " and "), .groups = "drop") %>%
+  mutate(txt = paste0(genes, " downsampled to n=", min_n)) %>%
+  pull(txt) %>%
+  paste(collapse = "; ")
+
 ggplot(downsample_long, aes(x = p_value)) +
   geom_histogram(binwidth = 0.05, boundary = 0,
                  fill = "steelblue", color = "white", alpha = 0.8) +
@@ -3120,7 +3248,7 @@ ggplot(downsample_long, aes(x = p_value)) +
   labs(
     title    = "P-value Distribution Across 1,000 Downsampled Iterations",
     subtitle = paste0("Red dashed line = p = 0.05 threshold. All groups downsampled to minimum n per gene.\n",
-                      "HSP70 downsampled to n=18; HSP90 and VIPERIN downsampled to n=8."),
+                      min_n_fragment, "."),
     x        = "p-value",
     y        = "Count (of 1,000 iterations)"
   ) +
@@ -3305,20 +3433,28 @@ Fold change relative to No_PolyIC_Control, plotted on a log2 scale so up- and do
 #| label: plot-foldchange-individual
 #| fig.width: 12
 #| fig.height: 7
-genes_plot <- c("HSP70", "HSP90", "VIPERIN")
+# Use the significant-gene set derived programmatically in the "Create ANOVA Models"
+# section above, rather than a hand-picked three-gene list -- the composition and
+# count of significant genes changes whenever the normalizing gene changes.
+genes_plot <- significant_genes
+
+# Build lettered panel labels dynamically (A, B, C, ...) so this scales to however
+# many genes are in `genes_plot`, instead of hand-enumerating three gene names.
+panel_levels <- genes_plot
+panel_labels <- paste0(LETTERS[seq_along(genes_plot)], ". ", genes_plot)
 
 # Add panel labels to gene names for facet titles
 ddCq_per_sample_labeled <- ddCq_per_sample %>%
   filter(Target %in% genes_plot) %>%
   mutate(Target = factor(Target,
-                         levels = c("HSP70", "HSP90", "VIPERIN"),
-                         labels = c("A. HSP70", "B. HSP90", "C. VIPERIN")))
+                         levels = panel_levels,
+                         labels = panel_labels))
 
 ddCq_summary_labeled <- ddCq_summary %>%
   filter(Target %in% genes_plot) %>%
   mutate(Target = factor(Target,
-                         levels = c("HSP70", "HSP90", "VIPERIN"),
-                         labels = c("A. HSP70", "B. HSP90", "C. VIPERIN")))
+                         levels = panel_levels,
+                         labels = panel_labels))
 
 sig_annotations <- ddCq_per_sample %>%
   filter(Target %in% genes_plot) %>%
@@ -3331,8 +3467,8 @@ sig_annotations <- ddCq_per_sample %>%
   ) %>%
   ungroup() %>%
   mutate(Target = factor(Target,
-                         levels = c("HSP70", "HSP90", "VIPERIN"),
-                         labels = c("A. HSP70", "B. HSP90", "C. VIPERIN")))
+                         levels = panel_levels,
+                         labels = panel_labels))
 
 plot_fc <- ggplot() +
   geom_point(
