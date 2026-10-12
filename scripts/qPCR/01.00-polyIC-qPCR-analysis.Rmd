@@ -29,17 +29,18 @@ editor_options:
 #| label: setup
 #| results: hold
 
-# Set output directory
+# Output directory for files this document explicitly writes (e.g. fc_genes.png via
+# ggsave). Knitted output (.md and its figures) uses rmarkdown's default location:
+# next to this Rmd, with figures in 01.00-polyIC-qPCR-analysis_files/.
 output_dir <- "output/qPCR/01.00-polyIC-qPCR-analysis"
-dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "figures"), recursive = TRUE, showWarnings = FALSE)
 
 knitr::opts_chunk$set(
   echo = TRUE,         # Display code chunks
   eval = TRUE,        # Evaluate code chunks
   warning = FALSE,     # Hide warnings
   message = FALSE,     # Hide messages
-  comment = "",        # Prevents appending '##' to beginning of lines in code output
-  fig.path = file.path(output_dir, "figures/")
+  comment = ""         # Prevents appending '##' to beginning of lines in code output
 )
 
 library(tidyverse)
@@ -3650,11 +3651,8 @@ plot_fc <- ggplot() +
     strip.text      = element_text(face = "bold")
   ); plot_fc
 
-# Save alongside the rest of this document's generated figures (output_dir/figures/,
-# set up in the setup chunk and already used as knitr's fig.path for every other
-# chunk plot) rather than a separate top-level figures/qPCR/ path -- this keeps the
-# path relative to output_dir, which is already resolved consistently regardless of
-# which working directory the document is knit from.
+# Save to output_dir/figures/ (created in the setup chunk) rather than a separate
+# top-level figures/qPCR/ path, so the path stays relative to output_dir.
 #
 # Scale the saved figure's width with the number of panels (one per significant gene,
 # nrow = 1 above) rather than a fixed width -- a fixed width made sense when this was
