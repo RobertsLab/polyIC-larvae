@@ -2636,6 +2636,8 @@ print(delta_delta_mech_polyIC)
 
 ## Fold Change Bar Plots
 
+Bars show log2 fold change (log2 FC = −ΔΔCq) relative to the stated control group, so increases and decreases of the same magnitude are the same height above or below 0. The right-hand axis gives the equivalent fold change (e.g. 2× = log2 FC of 1; 1/2× = −1).
+
 ### No PolyIC: Stressors vs Control
 
 ```{r barplot-fold-change-no-polyIC}
@@ -2650,19 +2652,40 @@ fold_change_no_polyIC <- bind_rows(
   delta_delta_mech_no_polyIC %>% mutate(comparison = "Mechanical vs Control")
 )
 
-fold_change_no_polyIC %>%
-  ggplot(aes(x = Target, y = fold_change, fill = comparison)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  geom_hline(aes(yintercept = 1, linetype = "No change (FC = 1)"), color = "black") +
-  scale_linetype_manual(name = "", values = c("No change (FC = 1)" = "dashed")) +
-  theme_bw() +
-  labs(
-    title = "Fold Change: Stressors vs Control (No PolyIC)",
-    x = "Target Gene",
-    y = "Fold Change",
-    fill = "Comparison"
-  ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Fold-change bar plot on a log2 scale: bars show log2(FC) = -delta_delta_Cq, so
+# up- and down-regulation are symmetric around 0 and a large change (e.g. HSP70
+# under temperature stress) no longer flattens every other gene, as it does on a
+# linear fold-change axis. The right-hand axis labels the same gridlines in
+# fold-change units.
+plot_log2fc <- function(df, fill_var, title, fill_lab = NULL, show_fill_legend = TRUE) {
+  df <- df %>% mutate(log2_fc = -delta_delta_Cq)
+  brk <- seq(floor(min(c(df$log2_fc, 0), na.rm = TRUE)),
+             ceiling(max(c(df$log2_fc, 0), na.rm = TRUE)), by = 1)
+  fc_lab <- ifelse(brk >= 0, paste0(2^brk, "×"), paste0("1/", 2^(-brk), "×"))
+
+  # Fold-change value printed at the end of each bar so small changes stay readable
+  df <- df %>% mutate(fc_txt = sprintf("%.2f×", 2^log2_fc),
+                      lab_vjust = ifelse(log2_fc >= 0, -0.4, 1.4))
+
+  ggplot(df, aes(x = Target, y = log2_fc, fill = .data[[fill_var]])) +
+    geom_col(position = position_dodge(0.9), width = 0.85) +
+    geom_text(aes(label = fc_txt, vjust = lab_vjust, group = .data[[fill_var]]),
+              position = position_dodge(0.9), size = 3) +
+    geom_hline(aes(yintercept = 0, linetype = "No change (log2 FC = 0)"), color = "black") +
+    scale_linetype_manual(name = "", values = c("No change (log2 FC = 0)" = "dashed")) +
+    scale_y_continuous(breaks = brk,
+                       expand = expansion(mult = 0.10),  # room for value labels
+                       sec.axis = sec_axis(~ ., breaks = brk, labels = fc_lab,
+                                           name = "Fold change")) +
+    theme_bw() +
+    labs(title = title, x = "Target Gene", y = "log2 fold change (−ΔΔCq)", fill = fill_lab) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid.minor = element_blank()) +
+    if (!show_fill_legend) guides(fill = "none") else NULL
+}
+
+plot_log2fc(fold_change_no_polyIC, "comparison",
+            "Fold Change: Stressors vs Control (No PolyIC)", fill_lab = "Comparison")
 ```
 
 ### PolyIC Control vs Basic Control
@@ -2673,18 +2696,9 @@ fold_change_no_polyIC %>%
 #| fig.width: 10
 #| fig.height: 6
 
-delta_delta_polyIC_control %>%
-  ggplot(aes(x = Target, y = fold_change, fill = Target)) +
-  geom_bar(stat = "identity") +
-  geom_hline(aes(yintercept = 1, linetype = "No change (FC = 1)"), color = "black") +
-  scale_linetype_manual(name = "", values = c("No change (FC = 1)" = "dashed")) +
-  theme_bw() +
-  labs(
-    title = "Fold Change: PolyIC Control vs Basic Control",
-    x = "Target Gene",
-    y = "Fold Change"
-  ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Gene is already on the x-axis, so the fill legend would be redundant
+plot_log2fc(delta_delta_polyIC_control, "Target",
+            "Fold Change: PolyIC Control vs Basic Control", show_fill_legend = FALSE)
 ```
 
 ### PolyIC: Stressors vs Control
@@ -2701,19 +2715,8 @@ fold_change_polyIC <- bind_rows(
   delta_delta_mech_polyIC %>% mutate(comparison = "Mechanical vs Control")
 )
 
-fold_change_polyIC %>%
-  ggplot(aes(x = Target, y = fold_change, fill = comparison)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  geom_hline(aes(yintercept = 1, linetype = "No change (FC = 1)"), color = "black") +
-  scale_linetype_manual(name = "", values = c("No change (FC = 1)" = "dashed")) +
-  theme_bw() +
-  labs(
-    title = "Fold Change: Stressors vs Control (PolyIC Treatment)",
-    x = "Target Gene",
-    y = "Fold Change",
-    fill = "Comparison"
-  ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+plot_log2fc(fold_change_polyIC, "comparison",
+            "Fold Change: Stressors vs Control (PolyIC Treatment)", fill_lab = "Comparison")
 ```
 
 # Temperature-Only Analysis: PolyIC vs No_PolyIC (Mechanical Excluded)
