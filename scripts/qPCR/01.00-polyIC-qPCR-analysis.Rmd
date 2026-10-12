@@ -2724,6 +2724,8 @@ sample_sizes <- data %>%
 
 Each gene's first plot (colored by PolyIC) is annotated with a Compact Letter Display (CLD) from that gene's two-way ANOVA on the temperature-only data. The method matches the all-stressor Summary Plots: letters are shown only when at least one ANOVA term (polyIC, stress_type or their interaction) has p < 0.05, and they come from Tukey-adjusted pairwise comparisons of the four PolyIC × stress-type group means. Groups that share a letter are **not** significantly different. The second plot (colored by biological replicate) is a diagnostic and is not annotated.
 
+Each gene ends with an interpretation generated from its results: assumption checks, the two-way ANOVA terms, and the four Tukey-adjusted comparisons that match the plot's CLD letters (PolyIC vs No_PolyIC at each temperature, and Temperature vs Control with and without PolyIC).
+
 ```{r temp-only-cld-helper}
 #| label: temp-only-cld-helper
 # Boxplot of delta Cq by stress type x PolyIC for one gene from the temperature-only
@@ -2763,6 +2765,104 @@ plot_temp_cld <- function(gene) {
   }
   p
 }
+
+# Results-driven interpretation text for one gene's temperature-only two-way ANOVA.
+# Generated from the same model, assumption tests and Tukey family used for the
+# plot's CLD letters, so it updates automatically when the data or the
+# normalizing gene change (replaces hand-written verdicts that went stale).
+interpret_temp_gene <- function(gene, alpha = 0.05) {
+  p_txt   <- function(p) ifelse(p < 1e-4, "p < 0.0001",
+                                paste0("p = ", formatC(p, format = "f", digits = 4)))
+  sig_txt <- function(p) ifelse(p < alpha, "**significant**", "not significant")
+
+  gene_df <- data %>%
+    filter(Target == gene) %>%
+    mutate(polyIC = factor(polyIC), stress_type = factor(stress_type))
+  fit <- aov(delta_Cq ~ polyIC * stress_type, data = gene_df)
+  tab <- summary(fit)[[1]]
+  rownames(tab) <- trimws(rownames(tab))
+  p_term <- setNames(tab[c("polyIC", "stress_type", "polyIC:stress_type"), "Pr(>F)"],
+                     c("polyIC", "stress_type", "interaction"))
+
+  # Same assumption tests as the Robustness section's assumption table
+  shapiro_p <- shapiro.test(residuals(fit))$p.value
+  levene_p  <- leveneTest(delta_Cq ~ polyIC * stress_type, data = gene_df)[1, "Pr(>F)"]
+  normal_ok <- shapiro_p >= alpha
+  var_ok    <- levene_p  >= alpha
+
+  # Headline
+  if (all(p_term >= alpha)) {
+    head_txt <- "No significant effect of PolyIC, temperature, or their interaction."
+  } else if (p_term[["interaction"]] < alpha) {
+    head_txt <- paste("Significant PolyIC × temperature interaction: the PolyIC effect differs",
+                      "between Control and Temperature, so interpret the group comparisons",
+                      "below rather than the main effects alone.")
+  } else if (p_term[["polyIC"]] < alpha && p_term[["stress_type"]] < alpha) {
+    head_txt <- paste("Significant main effects of PolyIC and temperature, with no significant",
+                      "interaction (the two effects are additive).")
+  } else if (p_term[["polyIC"]] < alpha) {
+    head_txt <- paste("Significant main effect of PolyIC, with no significant interaction",
+                      "(the PolyIC effect is similar at both temperatures).")
+  } else {
+    head_txt <- paste("Significant main effect of temperature, with no significant interaction",
+                      "(the temperature effect is similar with and without PolyIC).")
+  }
+  out <- c(paste0("**Summary (", gene, "):** ", head_txt), "")
+
+  # Assumptions
+  out <- c(out, "**Assumptions:**", "",
+           paste0("- Residual normality (Shapiro–Wilk): ", ifelse(normal_ok, "met", "**not met**"),
+                  " (", p_txt(shapiro_p), ")"),
+           paste0("- Equal variances (Levene): ", ifelse(var_ok, "met", "**not met**"),
+                  " (", p_txt(levene_p), ")"))
+  if (!(normal_ok && var_ok)) {
+    out <- c(out, paste0("- Because ", ifelse(!normal_ok && !var_ok, "neither assumption is met",
+                                              "one assumption is not met"),
+                         ", check *Robustness of Two-way ANOVA Results* below to see whether these ",
+                         "conclusions hold under ",
+                         ifelse(!var_ok, "the HC3 (unequal-variance) test", "the permutation test"), "."))
+  }
+  out <- c(out, "")
+
+  # ANOVA terms (Type I, as printed by summary(model) above)
+  out <- c(out, "**Two-way ANOVA** (from `summary(model)` above):", "",
+           paste0("- PolyIC: ", sig_txt(p_term[["polyIC"]]), " (", p_txt(p_term[["polyIC"]]), ")"),
+           paste0("- Stress type (Control vs Temperature): ", sig_txt(p_term[["stress_type"]]),
+                  " (", p_txt(p_term[["stress_type"]]), ")"),
+           paste0("- PolyIC × stress type: ", sig_txt(p_term[["interaction"]]),
+                  " (", p_txt(p_term[["interaction"]]), ")"), "")
+
+  # Group comparisons from the same Tukey family as the CLD letters on the plot
+  pw <- as.data.frame(pairs(emmeans(fit, ~ polyIC * stress_type), adjust = "tukey"))
+  pw$contrast <- gsub("[()]", "", as.character(pw$contrast))
+  comps <- list(
+    list(a = "PolyIC Control",        b = "No_PolyIC Control",     lab = "At Control",       an = "PolyIC",      bn = "No_PolyIC"),
+    list(a = "PolyIC Temperature",    b = "No_PolyIC Temperature", lab = "At Temperature",   an = "PolyIC",      bn = "No_PolyIC"),
+    list(a = "No_PolyIC Temperature", b = "No_PolyIC Control",     lab = "Without PolyIC",   an = "Temperature", bn = "Control"),
+    list(a = "PolyIC Temperature",    b = "PolyIC Control",        lab = "With PolyIC",      an = "Temperature", bn = "Control")
+  )
+  out <- c(out, paste0("**Group comparisons** (Tukey-adjusted, same tests as the CLD letters; ",
+                       "Δ = difference in mean delta Cq; negative Δ = higher expression relative to ",
+                       normalizing_gene, "):"), "")
+  for (cmp in comps) {
+    r <- pw[pw$contrast == paste(cmp$a, "-", cmp$b), ]; sgn <- 1
+    if (nrow(r) == 0) { r <- pw[pw$contrast == paste(cmp$b, "-", cmp$a), ]; sgn <- -1 }
+    stopifnot(nrow(r) == 1)
+    d <- sgn * r$estimate
+    p <- r$p.value
+    verdict <- if (p >= alpha) "no significant difference" else
+      paste0("**", ifelse(d < 0, "higher", "lower"), " expression in ", cmp$an, "**")
+    out <- c(out, paste0("- ", cmp$lab, ", ", cmp$an, " vs ", cmp$bn, ": Δ = ", sprintf("%+.2f", d),
+                         ", ", p_txt(p), " (", verdict, ")"))
+  }
+  # A significant ANOVA term with no significant Tukey pair (all CLD letters shared)
+  if (any(p_term < alpha) && all(pw$p.value >= alpha)) {
+    out <- c(out, "", paste("*Note:* although at least one ANOVA term is significant, none of the",
+                            "six Tukey-adjusted pairwise comparisons is, so the effect is small",
+                            "relative to within-group variation."))
+  }
+  paste(c(out, ""), collapse = "\n")
+}
 ```
 
 ### ATP Synthase
@@ -2799,8 +2899,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Does not meet assumptions. 
-
+```{r temp-only-interpret-atp-synthase}
+#| label: temp-only-interpret-atp-synthase
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("ATP.Synthase"))
+```
 
 ### Citrate Synthase
 
@@ -2836,7 +2940,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Does not meet assumptions. 
+```{r temp-only-interpret-citrate-synthase}
+#| label: temp-only-interpret-citrate-synthase
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("Citrate.Synthase"))
+```
 
 ### DNMT1
 
@@ -2872,7 +2981,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions. No differences. 
+```{r temp-only-interpret-dnmt1}
+#| label: temp-only-interpret-dnmt1
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("DNMT1"))
+```
 
 ### HSP70
 
@@ -2911,7 +3025,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions. Difference between PolyIC treatments and lower at elevated temperature, no interactive effects. 
+```{r temp-only-interpret-hsp70}
+#| label: temp-only-interpret-hsp70
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("HSP70"))
+```
 
 ### GAPDH
 
@@ -2950,7 +3069,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions (Levene's p = 0.98). Significant difference between PolyIC treatments (p < 0.0001 at Control, p < 0.0001 at Temperature); no significant stress-type effect and no interaction -- the PolyIC effect is consistent across temperatures.
+```{r temp-only-interpret-gapdh}
+#| label: temp-only-interpret-gapdh
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("GAPDH"))
+```
 
 ### VIPERIN
 
@@ -2989,7 +3113,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions. Difference between PolyIC treatments. 
+```{r temp-only-interpret-viperin}
+#| label: temp-only-interpret-viperin
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("VIPERIN"))
+```
 
 ### cGAS
 
@@ -3025,7 +3154,12 @@ plot(model, 3)
 plot(model, 4)
 ```
 
-Meets assumptions. No effect. 
+```{r temp-only-interpret-cgas}
+#| label: temp-only-interpret-cgas
+#| results: asis
+#| echo: false
+cat(interpret_temp_gene("cGAS"))
+```
 
 ## Robustness of Two-way ANOVA Results
 
@@ -3265,7 +3399,9 @@ if (nrow(robust_sig) > 0) {
 
 ## Fold Change Figures: PolyIC vs No_PolyIC at Control and High Temperature
 
-Visualize per-sample delta-delta Cq and fold change relative to the No_PolyIC Control group mean. Each point represents one biological replicate sample. The reference group (No_PolyIC_Control) anchors at delta-delta Cq = 0 / fold change = 1. Individual points are shown alongside group mean ± SE to convey both biological variability and the central tendency.
+Visualize per-sample delta-delta Cq and fold change relative to the No_PolyIC Control group mean. The genes shown are those with at least one significant term (polyIC, stress_type or polyIC × stress_type, p < 0.05) in the *Create ANOVA Models* ANOVAs, which include all three stress types (Control, Temperature **and Mechanical**): `r paste(significant_genes, collapse = ", ")`. These figures show only the Control and Temperature groups, so a gene can appear here because of a Mechanical-stress effect even if it shows no PolyIC or temperature difference in this subset; see the per-gene temperature-only ANOVAs above for which comparisons are significant here.
+
+Each point represents one biological replicate sample. The reference group (No_PolyIC_Control) anchors at delta-delta Cq = 0 / fold change = 1. Individual points are shown alongside group mean ± SE to convey both biological variability and the central tendency.
 
 ```{r ddcq-per-sample-calculate}
 #| hold: true
@@ -3400,8 +3536,10 @@ Fold change relative to No_PolyIC_Control, plotted on a log2 scale so up- and do
 #| fig.width: 12
 #| fig.height: 7
 # Use the significant-gene set derived programmatically in the "Create ANOVA Models"
-# section above, rather than a hand-picked three-gene list -- the composition and
-# count of significant genes changes whenever the normalizing gene changes.
+# section above (genes with >=1 significant term in the ANOVA that INCLUDES the
+# Mechanical group), rather than a hand-picked list -- the composition and count of
+# significant genes changes whenever the normalizing gene changes. Note these plots
+# show only Control and Temperature; see the section intro text.
 genes_plot <- significant_genes
 
 # Build lettered panel labels dynamically (A, B, C, ...) so this scales to however
