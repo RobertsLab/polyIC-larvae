@@ -1269,7 +1269,8 @@ if(exists("sig_genes_comp1") && nrow(sig_genes_comp1) > 0) {
 # Create plot
 p <- no_polyIC_data %>%
   ggplot(aes(x = stress_type, y = delta_Cq, fill = stress_type)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
   coord_cartesian(clip = "off") +
@@ -1329,7 +1330,8 @@ if(exists("sig_genes_comp2") && nrow(sig_genes_comp2) > 0) {
 # Create plot
 p <- control_data %>%
   ggplot(aes(x = polyIC, y = delta_Cq, fill = polyIC)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
   coord_cartesian(clip = "off") +
@@ -1431,7 +1433,8 @@ if(exists("sig_genes_comp3") && nrow(sig_genes_comp3) > 0) {
 # Create plot
 p <- polyIC_data %>%
   ggplot(aes(x = stress_type, y = delta_Cq, fill = stress_type)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
   theme_bw() +
@@ -1505,7 +1508,8 @@ if(nrow(all_treat_annotations) > 0) {
 # Create plot
 p <- delta_Cq_df %>%
   ggplot(aes(x = treatment_group, y = delta_Cq, fill = polyIC)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y", ncol = 2) +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
   scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
@@ -2585,7 +2589,7 @@ if(nrow(cld_annotations) > 0) {
 # Create plot
 p <- delta_Cq_df %>%
   ggplot(aes(x = stress_type, y = delta_Cq, fill = polyIC)) +
-  geom_boxplot(position = position_dodge(0.8), alpha = 0.7) +
+  geom_boxplot(position = position_dodge(0.8), alpha = 0.7, outlier.shape = NA) +
   geom_point(position = position_dodge(0.8), alpha = 0.5, size = 1) +
   facet_wrap(~Target, scales = "free_y", ncol = 2) +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
@@ -2631,7 +2635,7 @@ cld_plot <- cld_annotations %>%
 # Create plot
 p <- plot_df %>%
   ggplot(aes(x = stress_type, y = delta_Cq, fill = polyIC)) +
-  geom_boxplot(position = position_dodge(0.8), alpha = 0.7) +
+  geom_boxplot(position = position_dodge(0.8), alpha = 0.7, outlier.shape = NA) +
   geom_point(position = position_dodge(0.8), alpha = 0.5, size = 1) +
   facet_wrap(~Target, scales = "free_y", ncol = 2) +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray",
@@ -2715,7 +2719,7 @@ plot1<-data%>%
   filter(Target=="ATP.Synthase")%>%
   
     ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2725,7 +2729,7 @@ data%>%
   filter(Target=="ATP.Synthase")%>%
   
     ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
@@ -2758,7 +2762,7 @@ plot2<-data%>%
   filter(Target=="Citrate.Synthase")%>%
   
     ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2768,7 +2772,7 @@ data%>%
   filter(Target=="Citrate.Synthase")%>%
   
     ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
@@ -2800,7 +2804,7 @@ plot3<-data%>%
   filter(Target=="DNMT1")%>%
   
     ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2810,7 +2814,7 @@ data%>%
   filter(Target=="DNMT1")%>%
   
     ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
@@ -2842,7 +2846,7 @@ plot4<-data%>%
   filter(Target=="HSP70")%>%
   
     ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2852,7 +2856,7 @@ data%>%
   filter(Target=="HSP70")%>%
   
     ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
@@ -2887,7 +2891,7 @@ plot5<-data%>%
   filter(Target=="GAPDH")%>%
   
   ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2897,7 +2901,7 @@ data%>%
   filter(Target=="GAPDH")%>%
   
   ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
@@ -2932,7 +2936,7 @@ plot6<-data%>%
   filter(Target=="VIPERIN")%>%
   
     ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2942,7 +2946,7 @@ data%>%
   filter(Target=="VIPERIN")%>%
   
     ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
@@ -2977,7 +2981,7 @@ plot7<-data%>%
   filter(Target=="cGAS")%>%
   
     ggplot(aes(x=stress_type, colour=polyIC, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 
@@ -2987,7 +2991,7 @@ data%>%
   filter(Target=="cGAS")%>%
   
     ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
-  geom_boxplot()+
+  geom_boxplot(outlier.shape = NA)+
   geom_point(position=position_dodge(0.75))+
   theme_classic()
 ```
