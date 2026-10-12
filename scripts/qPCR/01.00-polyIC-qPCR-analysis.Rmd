@@ -2453,34 +2453,52 @@ print(p)
 Repeat the same visualization restricted to Control and Temperature stress types only (excluding Mechanical stress), to focus on the Poly(I:C)-only comparisons.
 
 ```{r anova-summary-plots-subset}
+#| label: anova-summary-plots-subset
+#| fig.width: 12
+#| fig.height: 8
 # Filter out Mechanical treatment
 plot_df <- delta_Cq_df %>%
   filter(stress_type != "Mechanical")
 
-# Filter CLD annotations (keeps previously calculated y_pos)
+# Letters come from the all-stressor CLD (Tukey across all six PolyIC x stress-type
+# groups). Their y positions are recomputed from the plotted (Mechanical-excluded)
+# data: the all-stressor offsets scale with each gene's full range, which can exceed
+# this subset's free y-axis and push the letters out of the panel.
+subset_range <- plot_df %>%
+  group_by(Target) %>%
+  summarise(y_range = diff(range(delta_Cq, na.rm = TRUE)), .groups = "drop")
+subset_max <- plot_df %>%
+  group_by(Target, stress_type, polyIC) %>%
+  summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
 cld_plot <- cld_annotations %>%
-  filter(stress_type != "Mechanical")
+  filter(stress_type != "Mechanical") %>%
+  dplyr::select(Target, polyIC, stress_type, label) %>%
+  left_join(subset_max,   by = c("Target", "stress_type", "polyIC")) %>%
+  left_join(subset_range, by = "Target") %>%
+  mutate(y_pos = max_y + y_range * 0.06)
 
-# Create plot
+dodge <- position_dodge(0.8)
+
+# Create plot: 4 x 2 grid so seven panels get usable height
 p <- plot_df %>%
   ggplot(aes(x = stress_type, y = delta_Cq, fill = polyIC)) +
-  geom_boxplot(position = position_dodge(0.8), alpha = 0.7, outlier.shape = NA) +
-  geom_point(position = position_dodge(0.8), alpha = 0.5, size = 1) +
-  facet_wrap(~Target, scales = "free_y", ncol = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  geom_boxplot(position = dodge, alpha = 0.7, outlier.shape = NA) +
+  geom_point(position = dodge, alpha = 0.5, size = 1.2) +
+  facet_wrap(~Target, scales = "free_y", ncol = 4) +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray",
                                "PolyIC" = "salmon")) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
-  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
-  theme_bw() +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.22))) +  # headroom for letters
+  theme_bw(base_size = 13) +
   labs(
-    title = "Delta Cq by Treatment Group with ANOVA Significance (Excluding Mechanical Stress)",
+    title = "Delta Cq by treatment group (Mechanical stress excluded)",
     x = "Stress Type",
     y = "Delta Cq",
     fill = "PolyIC Treatment"
   ) +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "bottom"
+    legend.position = "bottom",
+    plot.caption = element_text(hjust = 0)
   )
 
 # Add CLD annotations
@@ -2489,21 +2507,19 @@ if(nrow(cld_plot) > 0) {
   p <- p +
     geom_text(
       data = cld_plot,
-      aes(
-        x = stress_type,
-        y = y_pos,
-        label = label,
-        group = polyIC
-      ),
-      position = position_dodge(0.8),
-      size = 4,
+      aes(x = stress_type, y = y_pos, label = label, group = polyIC),
+      position = dodge,
+      size = 4.5,
       vjust = 0,
       color = "darkorange",
-      fontface = "bold"
+      fontface = "bold",
+      inherit.aes = FALSE
     ) +
     labs(
-      subtitle = "Letters show statistical groupings (p ≤ 0.05). Groups sharing a letter are NOT significantly different.",
-      caption = paste0("Compact Letter Display shown for: ", paste(significant_genes, collapse = ", "), ".")
+      subtitle = "Letters: Tukey-adjusted groupings (p ≤ 0.05); groups sharing a letter are NOT significantly different",
+      caption = paste0("Letters are from the all-stressor ANOVAs (Tukey comparisons across Control, Temperature and Mechanical groups).\n",
+                       "Shown for genes with >=1 significant ANOVA term: ", paste(significant_genes, collapse = ", "), ".\n",
+                       "For letters from the temperature-only ANOVAs, see the per-gene plots in the Temperature-Only Analysis section.")
     )
 }
 
