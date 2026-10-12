@@ -3027,292 +3027,241 @@ plot(model, 4)
 
 Meets assumptions. No effect. 
 
-## Downsampling Robustness Analysis
+## Robustness of Two-way ANOVA Results
 
-### Rationale
+The per-gene ANOVAs above use `aov()`, which has two limitations for this data subset:
 
-```{r downsample-rationale-text}
-#| hold: true
-#| results: asis
-#| label: downsample-rationale-text
-#| echo: false
+1. **Sequential (Type I) sums of squares.** Group sizes here are slightly unequal (see *Data Subset and Sample Sizes*), so with `aov()` the polyIC and stress_type tests depend on the order in which the terms are entered.
+2. **Normality and equal-variance assumptions.** Several genes have non-normal residuals and/or unequal group variances (see the assumption checks in each gene's section above).
 
-# Build the rationale paragraph programmatically from `significant_genes` (computed in
-# "Create ANOVA Models" above) and the real per-group sample sizes, rather than
-# hand-typing a gene list and sample-size figures that go stale whenever the
-# normalizing gene -- and therefore the set of significant genes -- changes.
-genes_to_test <- significant_genes
+To check whether the conclusions depend on these issues, every gene is re-tested on the full temperature-only data (no samples discarded) with three methods:
 
-group_n_by_gene <- data %>%
-  filter(Target %in% genes_to_test) %>%
-  group_by(Target, polyIC, stress_type) %>%
-  summarise(n = sum(!is.na(delta_Cq)), .groups = "drop")
+- **Type II ANOVA** (`car::Anova(..., type = 2)`): each main effect is tested after adjusting for the other, so results do not depend on term order.
+- **HC3 Type II ANOVA** (`white.adjust = "hc3"`): the same tests with heteroscedasticity-consistent standard errors, which are robust to unequal group variances.
+- **Permutation Type II ANOVA** (Freedman–Lane, 5,000 permutations): for each term, residuals from the model without that term are randomly shuffled and the Type II F-statistic is recomputed, giving a p-value that does not assume normally distributed residuals.
 
-min_n_by_gene <- group_n_by_gene %>%
-  group_by(Target) %>%
-  summarise(min_n = min(n), max_n = max(n), .groups = "drop")
+The two robust methods target different assumptions. HC3 corrects for unequal variances but still relies on approximate normality, while the permutation test drops the normality assumption but treats residuals as interchangeable, which effectively assumes similar variances across groups. So for genes with unequal variances (Levene p < 0.05), the HC3 result is the more reliable of the two.
 
-# Group genes by their (min_n, max_n) pair so genes sharing the same sample-size
-# pattern are reported together (mirrors how the old hand-written prose grouped them)
-size_groups <- min_n_by_gene %>%
-  group_by(min_n, max_n) %>%
-  summarise(genes = paste(Target, collapse = ", "), .groups = "drop")
+A result is treated as robust when all three methods agree on whether p < 0.05. When the polyIC × stress_type interaction is significant, the main effects should be interpreted through the group comparisons (CLD letters) in the per-gene plots above rather than on their own.
 
-size_sentence <- paste(
-  paste0(size_groups$genes, ": n=", size_groups$min_n,
-         " in the smallest group (vs. n=", size_groups$max_n, " elsewhere)"),
-  collapse = "; "
-)
+### Assumption Checks and Test Results
 
-cat(paste0(
-  paste(genes_to_test, collapse = ", "),
-  " showed statistically significant differences between PolyIC treatments in the ANOVAs above. ",
-  "However, the PolyIC_Control group has unequal sample sizes compared to other groups (",
-  size_sentence,
-  ") because a subset of samples were never run on those qPCR plates. ",
-  "To verify that these significant results are not an artifact of unequal sample sizes -- ",
-  "and would hold even with balanced, reduced data -- we perform a randomized downsampling analysis.\n"
-))
-```
-
-**Approach:** For each gene, we identify the minimum sample size present in any treatment group. We then randomly subsample that number of observations from every group, run the two-way ANOVA (`delta_Cq ~ polyIC * stress_type`), and record the p-values for each model term. This is repeated 1,000 times. The proportion of iterations yielding p < 0.05 for each term indicates whether the significance is robust to sample size reduction.
-
-```{r downsample-setup}
-#| hold: true
-#| results: hold
-#| label: downsample-setup
-
+```{r robust-anova}
+#| label: robust-anova
 set.seed(42)
-n_iter <- 1000
+n_perm <- 5000
+alpha  <- 0.05
 
-# Run downsampling for a single gene and return a data frame of p-values
-run_downsampling <- function(gene_name, df, n_iterations = 1000) {
-  
-  gene_data <- df %>%
-    filter(Target == gene_name)
-  
-  # Identify group sample sizes
-  group_sizes <- gene_data %>%
-    group_by(polyIC, stress_type) %>%
-    summarise(n = n(), .groups = "drop")
-  
-  min_n <- min(group_sizes$n)
-  
-  cat("Gene:", gene_name, "\n")
-  cat("  Group sizes before downsampling:\n")
-  print(as.data.frame(group_sizes))
-  cat("  Downsampling all groups to n =", min_n, "per group\n\n")
-  
-  # Run iterations
-  results <- map_df(1:n_iterations, function(i) {
-    
-    # Downsample each group to min_n
-    downsampled <- gene_data %>%
-      group_by(polyIC, stress_type) %>%
-      slice_sample(n = min_n) %>%
-      ungroup()
-    
-    # Fit ANOVA
-    model <- tryCatch(
-      aov(delta_Cq ~ polyIC * stress_type, data = downsampled),
-      error = function(e) NULL
-    )
-    
-    if (is.null(model)) {
-      return(data.frame(
-        iter        = i,
-        p_polyIC    = NA_real_,
-        p_stress    = NA_real_,
-        p_interact  = NA_real_
-      ))
-    }
-    
-    s <- summary(model)[[1]]
-    rownames(s) <- trimws(rownames(s))
-    
-    data.frame(
-      iter       = i,
-      p_polyIC   = s["polyIC",          "Pr(>F)"],
-      p_stress   = s["stress_type",     "Pr(>F)"],
-      p_interact = s["polyIC:stress_type", "Pr(>F)"]
-    )
+# Test every gene in the temperature-only subset (not a pre-selected subset).
+robust_genes <- intersect(all_genes_of_interest, unique(data$Target))
+
+term_names <- c("polyIC", "stress_type", "polyIC:stress_type")
+
+# Type II F-statistics computed from residual sums of squares (RSS), so they can be
+# evaluated for thousands of permuted responses at once: qr.resid() accepts a matrix
+# whose columns are separate response vectors.
+#   polyIC:      RSS(~ stress_type)          - RSS(~ polyIC + stress_type)
+#   stress_type: RSS(~ polyIC)               - RSS(~ polyIC + stress_type)
+#   interaction: RSS(~ polyIC + stress_type) - RSS(~ polyIC * stress_type)
+# each divided by its df and by the full-model error mean square.
+type2_F <- function(Y, qrs, df_err) {
+  rss <- lapply(qrs, function(q) colSums(qr.resid(q, Y)^2))
+  ms_err <- rss$full / df_err
+  cbind(
+    polyIC               = ((rss$stress   - rss$additive) / (qrs$additive$rank - qrs$stress$rank)) / ms_err,
+    stress_type          = ((rss$polyIC   - rss$additive) / (qrs$additive$rank - qrs$polyIC$rank)) / ms_err,
+    `polyIC:stress_type` = ((rss$additive - rss$full)     / (qrs$full$rank - qrs$additive$rank))  / ms_err
+  )
+}
+
+# Reduced model used for each term's Freedman-Lane permutation (the Type II
+# comparison model that omits the term being tested).
+reduced_for <- c(polyIC = "stress", stress_type = "polyIC", `polyIC:stress_type` = "additive")
+
+robust_results  <- list()
+assumption_rows <- list()
+
+for (gene in robust_genes) {
+  gene_df <- data %>%
+    filter(Target == gene, !is.na(delta_Cq)) %>%
+    mutate(polyIC = factor(polyIC), stress_type = factor(stress_type))
+  y <- gene_df$delta_Cq
+  n <- length(y)
+
+  fit <- lm(delta_Cq ~ polyIC * stress_type, data = gene_df)
+
+  # Assumption checks on the full model
+  assumption_rows[[gene]] <- data.frame(
+    Target     = gene,
+    n          = n,
+    shapiro_p  = shapiro.test(residuals(fit))$p.value,
+    levene_p   = leveneTest(delta_Cq ~ polyIC * stress_type, data = gene_df)[1, "Pr(>F)"]
+  )
+
+  # 1) Type II ANOVA and 2) HC3 Type II ANOVA
+  a2   <- Anova(fit, type = 2)
+  ahc3 <- Anova(fit, type = 2, white.adjust = "hc3")
+
+  # 3) Permutation Type II ANOVA (Freedman-Lane)
+  qrs <- list(
+    stress   = qr(model.matrix(~ stress_type,          data = gene_df)),
+    polyIC   = qr(model.matrix(~ polyIC,               data = gene_df)),
+    additive = qr(model.matrix(~ polyIC + stress_type, data = gene_df)),
+    full     = qr(model.matrix(~ polyIC * stress_type, data = gene_df))
+  )
+  df_err <- n - qrs$full$rank
+  F_obs  <- type2_F(matrix(y), qrs, df_err)[1, ]
+
+  # Sanity check: the fast F-statistics must match car::Anova's Type II F-values
+  stopifnot(isTRUE(all.equal(unname(F_obs), unname(a2[term_names, "F value"]), tolerance = 1e-8)))
+
+  perm_index <- replicate(n_perm, sample.int(n))   # n x n_perm matrix of shuffles
+  perm_p <- sapply(term_names, function(term) {
+    q_red   <- qrs[[reduced_for[[term]]]]
+    fit_red <- qr.fitted(q_red, y)
+    res_red <- qr.resid(q_red, y)
+    Y_star  <- fit_red + matrix(res_red[perm_index], nrow = n)
+    F_star  <- type2_F(Y_star, qrs, df_err)[, term]
+    (1 + sum(F_star >= F_obs[[term]] * (1 - 1e-10))) / (n_perm + 1)
   })
-  
-  results$gene   <- gene_name
-  results$min_n  <- min_n
-  results
-}
 
-# Run for all three genes
-downsample_results <- map_df(genes_to_test, ~run_downsampling(.x, data, n_iter))
-```
-
-### Proportion of Significant Results Across Iterations
-
-```{r downsample-summary}
-#| hold: true
-#| results: hold
-#| label: downsample-summary
-
-sig_summary <- downsample_results %>%
-  group_by(gene, min_n) %>%
-  summarise(
-    n_valid_iters         = sum(!is.na(p_polyIC)),
-    pct_sig_polyIC        = round(mean(p_polyIC    < 0.05, na.rm = TRUE) * 100, 1),
-    pct_sig_stress        = round(mean(p_stress    < 0.05, na.rm = TRUE) * 100, 1),
-    pct_sig_interaction   = round(mean(p_interact  < 0.05, na.rm = TRUE) * 100, 1),
-    median_p_polyIC       = round(median(p_polyIC,   na.rm = TRUE), 4),
-    median_p_stress       = round(median(p_stress,   na.rm = TRUE), 4),
-    median_p_interaction  = round(median(p_interact, na.rm = TRUE), 4),
-    .groups = "drop"
+  robust_results[[gene]] <- data.frame(
+    Target         = gene,
+    term           = term_names,
+    p_type2        = a2[term_names, "Pr(>F)"],
+    p_hc3          = ahc3[term_names, "Pr(>F)"],
+    p_permutation  = unname(perm_p)
   )
-
-cat("=== DOWNSAMPLING ROBUSTNESS SUMMARY ===\n")
-cat("(", n_iter, "iterations per gene; all groups downsampled to min n per gene)\n\n", sep = "")
-cat("% of iterations where p < 0.05 (and median p-value):\n\n")
-
-for (i in seq_len(nrow(sig_summary))) {
-  g <- sig_summary$gene[i]
-  n <- sig_summary$min_n[i]
-  cat("--- ", g, " (downsampled to n = ", n, " per group) ---\n", sep = "")
-  cat("  polyIC effect:        ", sig_summary$pct_sig_polyIC[i],
-      "% significant  (median p = ", sig_summary$median_p_polyIC[i], ")\n", sep = "")
-  cat("  stress_type effect:   ", sig_summary$pct_sig_stress[i],
-      "% significant  (median p = ", sig_summary$median_p_stress[i], ")\n", sep = "")
-  cat("  polyIC × stress:      ", sig_summary$pct_sig_interaction[i],
-      "% significant  (median p = ", sig_summary$median_p_interaction[i], ")\n\n", sep = "")
 }
 
-# Interpretation
-cat("=== INTERPRETATION ===\n\n")
-for (i in seq_len(nrow(sig_summary))) {
-  g <- sig_summary$gene[i]
-  n <- sig_summary$min_n[i]
-  cat(g, " (n = ", n, " per group):\n", sep = "")
-  
-  for (term in c("polyIC", "stress_type", "interaction")) {
-    col  <- paste0("pct_sig_", ifelse(term == "stress_type", "stress",
-                                       ifelse(term == "interaction", "interaction", "polyIC")))
-    pct  <- sig_summary[[col]][i]
-    verdict <- if (pct >= 80) {
-      "ROBUST — significant in >= 80% of downsampled iterations; sample size is not driving this result."
-    } else if (pct >= 50) {
-      "MODERATE — significant in 50-79% of iterations; interpret with caution."
-    } else {
-      "NOT ROBUST — significant in < 50% of iterations; result may be sensitive to sample size."
-    }
-    cat("  ", term, ": ", pct, "% — ", verdict, "\n", sep = "")
-  }
-  cat("\n")
-}
-```
-
-### P-value Distribution Plots
-
-Histograms of p-values across all 1,000 downsampled iterations for each term. A distribution heavily skewed toward 0 confirms a robust effect; a uniform distribution indicates no real effect.
-
-```{r downsample-pvalue-plots}
-#| hold: true
-#| label: downsample-pvalue-plots
-#| fig.width: 12
-#| fig.height: 10
-
-# Reshape to long format for faceting
-downsample_long <- downsample_results %>%
-  pivot_longer(
-    cols      = c(p_polyIC, p_stress, p_interact),
-    names_to  = "term",
-    values_to = "p_value"
-  ) %>%
+robust_results  <- bind_rows(robust_results) %>%
   mutate(
-    term = dplyr::recode(term,
-      p_polyIC   = "PolyIC effect",
-      p_stress   = "Stress type effect",
-      p_interact = "PolyIC × Stress interaction"
-    )
+    n_sig  = (p_type2 < alpha) + (p_hc3 < alpha) + (p_permutation < alpha),
+    agree  = n_sig %in% c(0, 3),
+    call   = case_when(n_sig == 3 ~ "Significant (all methods)",
+                       n_sig == 0 ~ "Not significant (all methods)",
+                       TRUE       ~ "Methods disagree")
   )
+assumption_results <- bind_rows(assumption_rows) %>%
+  mutate(normal_residuals = shapiro_p >= alpha,
+         equal_variances  = levene_p  >= alpha)
 
-# Add % significant annotation per facet
-sig_labels <- downsample_long %>%
-  group_by(gene, term) %>%
-  summarise(
-    pct_sig = paste0(round(mean(p_value < 0.05, na.rm = TRUE) * 100, 1), "% p<0.05"),
-    .groups = "drop"
-  )
+# p-value formatting: permutation p-values cannot go below 1/(n_perm + 1)
+p_floor <- 1 / (n_perm + 1)
+fmt_p <- function(p, perm = FALSE) {
+  ifelse(perm & p <= p_floor + 1e-12, paste0("≤ ", formatC(p_floor, format = "f", digits = 4)),
+         ifelse(p < 1e-4, "< 0.0001", formatC(p, format = "f", digits = 4)))
+}
 
-# Build the "downsampled to n=X" subtitle fragment programmatically from the min_n
-# values recorded per gene in `downsample_results`, rather than hand-typing them.
-min_n_fragment <- downsample_results %>%
-  distinct(gene, min_n) %>%
-  group_by(min_n) %>%
-  summarise(genes = paste(gene, collapse = " and "), .groups = "drop") %>%
-  mutate(txt = paste0(genes, " downsampled to n=", min_n)) %>%
-  pull(txt) %>%
-  paste(collapse = "; ")
+assumption_results %>%
+  transmute(Gene = Target, n,
+            `Shapiro-Wilk p (residuals)` = fmt_p(shapiro_p),
+            `Levene p` = fmt_p(levene_p),
+            `Normal residuals` = ifelse(normal_residuals, "Yes", "No"),
+            `Equal variances`  = ifelse(equal_variances,  "Yes", "No")) %>%
+  knitr::kable(caption = "Assumption checks for each gene's two-way ANOVA (temperature-only data). Shapiro-Wilk tests normality of residuals; Levene's test (median-centered) tests equality of group variances. p < 0.05 indicates the assumption is violated.")
 
-ggplot(downsample_long, aes(x = p_value)) +
-  geom_histogram(binwidth = 0.05, boundary = 0,
-                 fill = "steelblue", color = "white", alpha = 0.8) +
-  geom_vline(xintercept = 0.05, color = "red", linetype = "dashed", linewidth = 0.8) +
-  geom_text(
-    data  = sig_labels,
-    aes(x = 0.75, y = Inf, label = pct_sig),
-    vjust = 1.5, size = 3.2, color = "red", fontface = "bold"
-  ) +
-  facet_grid(gene ~ term, scales = "free_y") +
-  scale_x_continuous(limits = c(0, 1), breaks = c(0, 0.05, 0.25, 0.5, 0.75, 1)) +
-  theme_bw() +
-  labs(
-    title    = "P-value Distribution Across 1,000 Downsampled Iterations",
-    subtitle = paste0("Red dashed line = p = 0.05 threshold. All groups downsampled to minimum n per gene.\n",
-                      min_n_fragment, "."),
-    x        = "p-value",
-    y        = "Count (of 1,000 iterations)"
-  ) +
-  theme(strip.text = element_text(size = 9))
+robust_results %>%
+  transmute(Gene = Target, Term = term,
+            `Type II p` = fmt_p(p_type2),
+            `HC3 Type II p` = fmt_p(p_hc3),
+            `Permutation p` = fmt_p(p_permutation, perm = TRUE),
+            Conclusion = call) %>%
+  knitr::kable(caption = paste0("Two-way ANOVA p-values by method (temperature-only data). Permutation p-values are from ",
+                                format(n_perm, big.mark = ","), " Freedman-Lane permutations; the smallest attainable value is ",
+                                formatC(p_floor, format = "f", digits = 4), "."))
 ```
 
-### Median P-value Comparison: Full vs. Downsampled Data
+### P-value Comparison Across Methods
 
-```{r downsample-vs-full}
-#| hold: true
-#| results: hold
-#| label: downsample-vs-full
+```{r robust-anova-pvalues}
+#| label: robust-anova-pvalues
+#| fig.width: 10
+#| fig.height: 6
+neglog_cap <- 6   # draw -log10(p) values above this at the cap so small p-values don't flatten the plot
 
-cat("=== FULL DATA vs. DOWNSAMPLED MEDIAN p-VALUES ===\n\n")
+robust_long <- robust_results %>%
+  pivot_longer(c(p_type2, p_hc3, p_permutation), names_to = "method", values_to = "p") %>%
+  mutate(
+    method = factor(method, levels = c("p_type2", "p_hc3", "p_permutation"),
+                    labels = c("Type II", "HC3 Type II", "Permutation")),
+    term   = factor(term, levels = term_names,
+                    labels = c("PolyIC", "Stress type", "PolyIC ×\nstress type")),
+    neglog = -log10(p),
+    capped = neglog > neglog_cap,
+    neglog_plot = pmin(neglog, neglog_cap),
+    Target = factor(Target, levels = robust_genes)   # same gene order as the tables
+  )
 
-for (g in genes_to_test) {
-  
-  # Full-data ANOVA p-values
-  full_model <- data %>%
-    filter(Target == g) %>%
-    aov(delta_Cq ~ polyIC * stress_type, data = .)
-  
-  s_full <- summary(full_model)[[1]]
-  rownames(s_full) <- trimws(rownames(s_full))
-  
-  # Downsampled median p-values
-  ds_gene <- downsample_results %>% filter(gene == g)
-  n_ds    <- unique(ds_gene$min_n)
-  
-  cat("--- ", g, " ---\n", sep = "")
-  cat(sprintf("  %-28s %12s %20s\n", "Term", "Full data p", 
-              paste0("Downsampled median p (n=", n_ds, ")")))
-  cat(sprintf("  %-28s %12s %20s\n",
-              "polyIC effect",
-              formatC(s_full["polyIC",             "Pr(>F)"], format = "f", digits = 4),
-              formatC(median(ds_gene$p_polyIC,   na.rm = TRUE), format = "f", digits = 4)))
-  cat(sprintf("  %-28s %12s %20s\n",
-              "stress_type effect",
-              formatC(s_full["stress_type",        "Pr(>F)"], format = "f", digits = 4),
-              formatC(median(ds_gene$p_stress,    na.rm = TRUE), format = "f", digits = 4)))
-  cat(sprintf("  %-28s %12s %20s\n",
-              "polyIC × stress interaction",
-              formatC(s_full["polyIC:stress_type", "Pr(>F)"], format = "f", digits = 4),
-              formatC(median(ds_gene$p_interact,  na.rm = TRUE), format = "f", digits = 4)))
-  cat("\n")
+p_robust <- ggplot(robust_long, aes(x = term, y = neglog_plot, colour = method, shape = capped)) +
+  geom_hline(yintercept = -log10(alpha), linetype = "dashed", colour = "grey40") +
+  geom_point(position = position_dodge(width = 0.6), size = 2.5) +
+  facet_wrap(~ Target, nrow = 2) +
+  scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
+                     labels = c(`FALSE` = "Exact", `TRUE` = paste0("> ", neglog_cap, " (capped)")),
+                     name = "-log10(p)") +
+  scale_colour_manual(values = c("Type II" = "grey30", "HC3 Type II" = "steelblue", "Permutation" = "darkorange"),
+                      name = "Method") +
+  scale_y_continuous(limits = c(0, neglog_cap), expand = expansion(mult = c(0.04, 0.04))) +
+  labs(title = "Two-way ANOVA p-values by method (temperature-only data)",
+       subtitle = paste0("Dashed line: p = ", alpha, ". Points above the line are significant. ",
+                         "Permutation p-values cannot exceed -log10(", formatC(p_floor, format = "f", digits = 4), ") = ",
+                         round(-log10(p_floor), 2), "."),
+       x = NULL, y = "-log10(p)") +
+  theme_bw() +
+  theme(legend.position = "right")
+
+print(p_robust)
+```
+
+### Interpretation
+
+```{r robust-anova-interpretation}
+#| label: robust-anova-interpretation
+#| results: asis
+fmt_list <- function(x) if (length(x) == 0) "none" else paste(x, collapse = ", ")
+# "p = 0.0123", "p < 0.0001", or (permutation floor) "p ≤ 0.0002"
+p_str <- function(p, perm = FALSE) {
+  f <- fmt_p(p, perm)
+  ifelse(grepl("^[<≤]", f), paste("p", f), paste("p =", f))
+}
+
+non_normal  <- assumption_results$Target[!assumption_results$normal_residuals]
+unequal_var <- assumption_results$Target[!assumption_results$equal_variances]
+disagree    <- robust_results %>% filter(!agree)
+n_tests     <- nrow(robust_results)
+
+cat("- **Genes with non-normal residuals (Shapiro-Wilk p < 0.05):** ", fmt_list(non_normal), "\n", sep = "")
+cat("- **Genes with unequal group variances (Levene p < 0.05):** ", fmt_list(unequal_var), "\n", sep = "")
+cat("- **Agreement:** the three methods agree on significance for ", sum(robust_results$agree), " of ",
+    n_tests, " gene × term tests.\n", sep = "")
+
+if (nrow(disagree) > 0) {
+  cat("- **Tests where methods disagree** (treat as not robust):\n")
+  for (i in seq_len(nrow(disagree))) {
+    r <- disagree[i, ]
+    note <- if (r$Target %in% unequal_var) {
+      paste0(" -- ", r$Target, " has unequal group variances, so the HC3 result (",
+             ifelse(r$p_hc3 < alpha, "significant", "not significant"), ") is the more reliable one")
+    } else ""
+    cat("    - ", r$Target, ", ", r$term, ": Type II ", p_str(r$p_type2),
+        "; HC3 ", p_str(r$p_hc3), "; permutation ", p_str(r$p_permutation, perm = TRUE), note, "\n", sep = "")
+  }
+} else {
+  cat("- **Tests where methods disagree:** none.\n")
+}
+
+robust_sig <- robust_results %>% filter(n_sig == 3)
+cat("\n**Robust significant effects (all three methods p < ", alpha, "):**\n\n", sep = "")
+if (nrow(robust_sig) > 0) {
+  for (g in unique(robust_sig$Target)) {
+    cat("- ", g, ": ", paste(robust_sig$term[robust_sig$Target == g], collapse = ", "), "\n", sep = "")
+  }
+} else {
+  cat("- none\n")
 }
 ```
+
 
 ## Fold Change Figures: PolyIC vs No_PolyIC at Control and High Temperature
 
