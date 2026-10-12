@@ -1258,9 +1258,17 @@ if(exists("sig_genes_comp1") && nrow(sig_genes_comp1) > 0) {
       group_by(Target, stress_type) %>%
       summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
     
+    # Calculate data range for each gene to use a proportional offset -- a flat
+    # offset doesn't scale across genes whose delta_Cq ranges differ substantially
+    # under facet_wrap's free_y scales
+    y_range_comp1 <- no_polyIC_data %>%
+      group_by(Target) %>%
+      summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+    
     sig_annotations_comp1 <- sig_annotations_comp1 %>%
       left_join(y_pos_comp1, by = c("Target", "stress_type")) %>%
-      mutate(y_pos = max_y + 0.5)
+      left_join(y_range_comp1, by = "Target") %>%
+      mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
   }
 } else {
   sig_annotations_comp1 <- data.frame()
@@ -1273,7 +1281,7 @@ p <- no_polyIC_data %>%
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
-  coord_cartesian(clip = "off") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
   theme_bw() +
   labs(
     title = "Delta Cq: Control vs Stressors (No PolyIC Treatment)",
@@ -1320,9 +1328,17 @@ if(exists("sig_genes_comp2") && nrow(sig_genes_comp2) > 0) {
     group_by(Target, polyIC) %>%
     summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
   
+  # Calculate data range for each gene to use a proportional offset -- a flat
+  # offset doesn't scale across genes whose delta_Cq ranges differ substantially
+  # under facet_wrap's free_y scales
+  y_range_comp2 <- control_data %>%
+    group_by(Target) %>%
+    summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
   sig_annotations_comp2 <- sig_annotations_comp2 %>%
     left_join(y_pos_comp2, by = c("Target", "polyIC")) %>%
-    mutate(y_pos = max_y + 0.5)
+    left_join(y_range_comp2, by = "Target") %>%
+    mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
 } else {
   sig_annotations_comp2 <- data.frame()
 }
@@ -1334,7 +1350,7 @@ p <- control_data %>%
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
-  coord_cartesian(clip = "off") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
   theme_bw() +
   labs(
     title = "Delta Cq: Basic Control vs PolyIC Control",
@@ -1342,24 +1358,11 @@ p <- control_data %>%
     y = "Delta Cq",
     fill = "Treatment"
   ) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    plot.margin = margin(t = 20, r = 10, b = 10, l = 10)
-  )
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # Add annotations if any exist
 if(nrow(sig_annotations_comp2) > 0) {
-  # Expand y-axis limits to ensure annotations are visible
-  y_limits_comp2 <- control_data %>%
-    group_by(Target) %>%
-    summarise(
-      y_min = min(delta_Cq, na.rm = TRUE) - 0.5,
-      y_max = max(delta_Cq, na.rm = TRUE) + 1.5,
-      .groups = "drop"
-    )
-  
   p <- p + 
-    geom_blank(data = y_limits_comp2, aes(x = 1, y = y_max), inherit.aes = FALSE) +
     geom_text(data = sig_annotations_comp2, 
               aes(x = polyIC, y = y_pos, label = label),
               inherit.aes = FALSE, size = 6, vjust = 0, color = "darkorange") +
@@ -1422,9 +1425,17 @@ if(exists("sig_genes_comp3") && nrow(sig_genes_comp3) > 0) {
       group_by(Target, stress_type) %>%
       summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
     
+    # Calculate data range for each gene to use a proportional offset -- a flat
+    # offset doesn't scale across genes whose delta_Cq ranges differ substantially
+    # under facet_wrap's free_y scales
+    y_range_comp3 <- polyIC_data %>%
+      group_by(Target) %>%
+      summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+    
     sig_annotations_comp3 <- sig_annotations_comp3 %>%
       left_join(y_pos_comp3, by = c("Target", "stress_type")) %>%
-      mutate(y_pos = max_y + 0.5)
+      left_join(y_range_comp3, by = "Target") %>%
+      mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
   }
 } else {
   sig_annotations_comp3 <- data.frame()
@@ -1437,6 +1448,7 @@ p <- polyIC_data %>%
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
   theme_bw() +
   labs(
     title = "Delta Cq: PolyIC Control vs PolyIC Stressors",
