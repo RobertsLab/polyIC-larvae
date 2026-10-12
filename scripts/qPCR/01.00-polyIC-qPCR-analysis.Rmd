@@ -253,7 +253,7 @@ if(nrow(excluded_samples) > 0) {
 }
 ```
 
-# Group and Summarize Data
+## Group and Summarize Data
 
 ```{r group-summarize}
 #| hold: true
@@ -270,7 +270,7 @@ grouped_df <- qpcr_filtered %>%
 str(grouped_df)
 ```
 
-# Parse Sample Names and Add Treatment Columns
+## Parse Sample Names and Add Treatment Columns
 
 Sample naming convention: Letter + Number + P (optional) + Treatment
 
@@ -309,7 +309,7 @@ grouped_df <- grouped_df %>%
 str(grouped_df)
 ```
 
-## View treatment groups
+### View treatment groups
 
 ```{r view-groups}
 #| hold: true
@@ -607,7 +607,7 @@ cat("\nNote: the CV ranking above and the ANOVA results above are two SEPARATE c
     "samples, which should be weighed when interpreting both criteria.\n")
 ```
 
-# Conclusion
+## Conclusion
 
 ```{r normalizing-gene-conclusion}
 #| hold: true
@@ -699,7 +699,7 @@ cat("Rows dropped for missing", normalizing_gene, "measurement:", n_dropped, "\n
 str(delta_Cq_df)
 ```
 
-# Missing samples analysis
+## Missing samples analysis
 
 ```{r missing-samples-analysis}
 #| hold: true
@@ -823,7 +823,7 @@ cat("  Total unique samples with issues: ", length(all_problematic_samples), "\n
 cat("  All unique sample names (failed QC + missing): ", paste(sort(all_problematic_samples), collapse = ", "), "\n", sep = "")
 ```
 
-# Normalizing Gene Impact Analysis
+## Normalizing Gene Impact Analysis
 
 ```{r normalizing-gene-impact-analysis}
 #| hold: true
@@ -2704,7 +2704,11 @@ sample_sizes <- delta_Cq_df %>%
   );sample_sizes
 ```
 
-# Statistical analysis for temperature comparisons only for PolyIC vs Control 
+# Temperature-Only Analysis: PolyIC vs No_PolyIC (Mechanical Excluded)
+
+## Data Subset and Sample Sizes
+
+All analyses in this section use only the Control and Temperature stress groups (Mechanical excluded).
 
 ```{r}
 data <- delta_Cq_df %>%
@@ -2720,7 +2724,9 @@ sample_sizes <- data %>%
   );sample_sizes
 ```
 
-## ATP Synthase 
+## Per-gene Two-way ANOVAs (PolyIC × Stress Type)
+
+### ATP Synthase
 
 Run ANOVA analyses and check assumptions 
 
@@ -2763,7 +2769,7 @@ plot(model, 4)
 Does not meet assumptions. 
 
 
-## Citrate Synthase 
+### Citrate Synthase
 
 Run ANOVA analyses and check assumptions 
 
@@ -2805,7 +2811,7 @@ plot(model, 4)
 
 Does not meet assumptions. 
 
-## DNMT1 
+### DNMT1
 
 Run ANOVA analyses and check assumptions 
 
@@ -2847,7 +2853,7 @@ plot(model, 4)
 
 Meets assumptions. No differences. 
 
-## HSP70
+### HSP70
 
 Run ANOVA analyses and check assumptions 
 
@@ -2892,7 +2898,7 @@ plot(model, 4)
 
 Meets assumptions. Difference between PolyIC treatments and lower at elevated temperature, no interactive effects. 
 
-## GAPDH
+### GAPDH
 
 Run ANOVA analyses and check assumptions 
 
@@ -2937,7 +2943,7 @@ plot(model, 4)
 
 Meets assumptions (Levene's p = 0.98). Significant difference between PolyIC treatments (p < 0.0001 at Control, p < 0.0001 at Temperature); no significant stress-type effect and no interaction -- the PolyIC effect is consistent across temperatures.
 
-## VIPERIN
+### VIPERIN
 
 Run ANOVA analyses and check assumptions 
 
@@ -2982,7 +2988,7 @@ plot(model, 4)
 
 Meets assumptions. Difference between PolyIC treatments. 
 
-## cGAS
+### cGAS
 
 Run ANOVA analyses and check assumptions 
 
@@ -3024,9 +3030,9 @@ plot(model, 4)
 
 Meets assumptions. No effect. 
 
-# Downsampling Robustness Analysis
+## Downsampling Robustness Analysis
 
-## Rationale
+### Rationale
 
 ```{r downsample-rationale-text}
 #| hold: true
@@ -3144,7 +3150,7 @@ run_downsampling <- function(gene_name, df, n_iterations = 1000) {
 downsample_results <- map_df(genes_to_test, ~run_downsampling(.x, data, n_iter))
 ```
 
-## Proportion of Significant Results Across Iterations
+### Proportion of Significant Results Across Iterations
 
 ```{r downsample-summary}
 #| hold: true
@@ -3204,7 +3210,7 @@ for (i in seq_len(nrow(sig_summary))) {
 }
 ```
 
-## P-value Distribution Plots
+### P-value Distribution Plots
 
 Histograms of p-values across all 1,000 downsampled iterations for each term. A distribution heavily skewed toward 0 confirms a robust effect; a uniform distribution indicates no real effect.
 
@@ -3269,7 +3275,7 @@ ggplot(downsample_long, aes(x = p_value)) +
   theme(strip.text = element_text(size = 9))
 ```
 
-## Median P-value Comparison: Full vs. Downsampled Data
+### Median P-value Comparison: Full vs. Downsampled Data
 
 ```{r downsample-vs-full}
 #| hold: true
@@ -3311,7 +3317,7 @@ for (g in genes_to_test) {
 }
 ```
 
-# Fold Change Figures: PolyIC vs No_PolyIC at Control and High Temperature
+## Fold Change Figures: PolyIC vs No_PolyIC at Control and High Temperature
 
 Visualize per-sample delta-delta Cq and fold change relative to the No_PolyIC Control group mean. Each point represents one biological replicate sample. The reference group (No_PolyIC_Control) anchors at delta-delta Cq = 0 / fold change = 1. Individual points are shown alongside group mean ± SE to convey both biological variability and the central tendency.
 
@@ -3367,7 +3373,7 @@ cat("Per-sample delta-delta Cq calculated for", n_distinct(ddCq_per_sample$Sampl
 cat("Reference group: No_PolyIC_Control (delta-delta Cq = 0 / fold change = 1)\n")
 ```
 
-## Delta-Delta Cq: Individual Replicates
+### Delta-Delta Cq: Individual Replicates
 
 Delta-delta Cq values per sample, relative to the No_PolyIC_Control group mean. Negative values indicate lower Cq (higher expression) relative to the reference; positive values indicate higher Cq (lower expression). Points are individual biological replicates; diamonds show group mean ± SE.
 
@@ -3438,7 +3444,7 @@ ggplot() +
   )
 ```
 
-## Fold Change: Individual Replicates (log2 scale)
+### Fold Change: Individual Replicates (log2 scale)
 
 Fold change relative to No_PolyIC_Control, plotted on a log2 scale so up- and down-regulation appear symmetrical. A log2 fold change of 1 = 2-fold upregulation; -1 = 2-fold downregulation. Points are individual biological replicates; diamonds show group mean ± SE.
 
@@ -3560,7 +3566,7 @@ ggsave(
 )
 ```
 
-## Fold Change Summary Table
+### Fold Change Summary Table
 
 ```{r foldchange-summary-table}
 #| hold: true
@@ -3587,7 +3593,7 @@ ddCq_summary %>%
   )
 ```
 
-# Calculate effect sizes
+## Effect Sizes (Cohen's d)
 
 ```{r}
 # Cohen's d effect sizes for polyIC effect per gene and stress type
