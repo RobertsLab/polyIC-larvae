@@ -1281,7 +1281,7 @@ p <- no_polyIC_data %>%
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +  # Extra space at top for annotations
   theme_bw() +
   labs(
     title = "Delta Cq: Control vs Stressors (No PolyIC Treatment)",
@@ -1296,7 +1296,7 @@ if(nrow(sig_annotations_comp1) > 0) {
   p <- p + 
     geom_text(data = sig_annotations_comp1, 
               aes(x = stress_type, y = y_pos, label = label),
-              inherit.aes = FALSE, size = 6, vjust = 0, color = "darkorange") +
+              inherit.aes = FALSE, size = 4, vjust = 0, color = "darkorange") +
     labs(subtitle = "Asterisks (*) indicate significant differences from Control (t-test p ≤ 0.05)",
          caption = paste("Significant comparisons:", paste(unique(sig_genes_comp1$Target), collapse = ", ")))
 } else {
@@ -1350,7 +1350,7 @@ p <- control_data %>%
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +  # Extra space at top for annotations
   theme_bw() +
   labs(
     title = "Delta Cq: Basic Control vs PolyIC Control",
@@ -1365,7 +1365,7 @@ if(nrow(sig_annotations_comp2) > 0) {
   p <- p + 
     geom_text(data = sig_annotations_comp2, 
               aes(x = polyIC, y = y_pos, label = label),
-              inherit.aes = FALSE, size = 6, vjust = 0, color = "darkorange") +
+              inherit.aes = FALSE, size = 4, vjust = 0, color = "darkorange") +
     labs(subtitle = "Asterisks (*) indicate significant differences (t-test p ≤ 0.05)",
          caption = paste("Genes with significant PolyIC effect:", paste(sig_genes_comp2$Target, collapse = ", ")))
 } else {
@@ -1448,7 +1448,7 @@ p <- polyIC_data %>%
   geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
   facet_wrap(~Target, scales = "free_y") +
   scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +  # Extra space at top for annotations
   theme_bw() +
   labs(
     title = "Delta Cq: PolyIC Control vs PolyIC Stressors",
@@ -1463,7 +1463,7 @@ if(nrow(sig_annotations_comp3) > 0) {
   p <- p + 
     geom_text(data = sig_annotations_comp3, 
               aes(x = stress_type, y = y_pos, label = label),
-              inherit.aes = FALSE, size = 6, vjust = 0, color = "darkorange") +
+              inherit.aes = FALSE, size = 4, vjust = 0, color = "darkorange") +
     labs(subtitle = "Asterisks (*) indicate significant differences from PolyIC Control (t-test p ≤ 0.05)",
          caption = paste("Significant comparisons:", paste(unique(sig_genes_comp3$Target), collapse = ", ")))
 } else {
