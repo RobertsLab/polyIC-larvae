@@ -1556,9 +1556,13 @@ Run ANOVA models to test for effects of PolyIC treatment and stress type on delt
 ANOVA assumes that data (or residuals) are approximately normally distributed. This histogram provides a quick visual check of the overall delta Cq distribution across all samples and targets.
 
 **What to look for:**
+
 - **Bell-shaped curve**: Indicates roughly normal distribution, supporting ANOVA use
+
 - **Skewness**: Strong left or right skew may violate normality assumptions
+
 - **Outliers**: Extreme values far from the main distribution
+
 - **Multimodal**: Multiple peaks may indicate distinct subpopulations
 
 While this shows the overall distribution, we'll check normality of residuals for each gene-specific model using QQ plots below.
