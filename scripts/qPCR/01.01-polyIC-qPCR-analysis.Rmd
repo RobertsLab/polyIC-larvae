@@ -456,6 +456,13 @@ knitr::kable(raw_cq_summary, digits = 3,
                               "directly comparable to the complete-data genes."))
 ```
 
+## Filter to only relevant treatments 
+
+```{r}
+grouped_df<-grouped_df%>%
+  filter(treatment_group %in% c("No_PolyIC_Control", "No_PolyIC_Temperature", "PolyIC_Temperature", "PolyIC_Control"))
+```
+
 ## Box plots and statistical comparisons: raw Cq by treatment group (all genes)
 
 ```{r rawcq-boxplot-all-groups}
@@ -464,8 +471,8 @@ knitr::kable(raw_cq_summary, digits = 3,
 #| fig.width: 10
 #| fig.height: 14
 
-treatment_order <- c("No_PolyIC_Control", "No_PolyIC_Temperature", "No_PolyIC_Mechanical",
-                      "PolyIC_Control", "PolyIC_Temperature", "PolyIC_Mechanical")
+treatment_order <- c("No_PolyIC_Control", "No_PolyIC_Temperature", 
+                      "PolyIC_Control", "PolyIC_Temperature")
 
 rawcq_all_df <- grouped_df %>%
   mutate(treatment_group = factor(treatment_group, levels = treatment_order))
@@ -662,3 +669,2925 @@ if (!is.na(best_row)) {
       "before selecting a normalizer.\n")
 }
 ```
+
+# Run ANOVA on candidate normalizing gene to test parental and treatment effects 
+
+```{r}
+model<-aov(Cq.Mean ~ polyIC * stress_type, data = grouped_df%>%filter(Target=="cGAS"))
+summary(model)
+```
+
+
+# Functions
+
+## Calculate delta Cq
+
+Normalized to the normalizing gene identified programmatically in the "Raw Cq Variation
+Assessment for Normalizing Gene Selection" section below (`normalizing_gene`) -- no gene
+name is hand-typed here. `normalizing_gene` is required (no default), so calling this
+function before that section has run (and set the variable) fails loudly rather than
+silently falling back to a stale gene name.
+
+Unlike GAPDH (which had a complete set of samples with no missing/QC-dropped data), a
+programmatically-selected normalizing gene is not guaranteed to have been measured for
+every sample -- some normalizer candidates have missing or QC-dropped values for a subset
+of samples (see the completeness table above). For any sample where the normalizing gene
+has no valid `Cq.Mean`, there is nothing to subtract, so `delta_Cq` is set to `NA` for
+every target in that sample rather than erroring; those rows are then dropped explicitly
+in the `calculate-delta-cq` chunk below, with a count of how many sample-gene
+combinations were lost this way.
+```{r function-delta-Cq}
+#| hold: true
+#| label: function-delta-Cq
+calculate_delta_Cq <- function(df, normalizing_gene) {
+  df <- df %>%
+    group_by(Sample) %>%
+    mutate(delta_Cq = {
+      norm_Cq <- Cq.Mean[Target == normalizing_gene]
+      if (length(norm_Cq) == 1) Cq.Mean - norm_Cq else NA_real_
+    }) %>%
+    ungroup()
+  
+  return(df)
+}
+```
+
+# Calculate Delta Cq
+
+```{r calculate-delta-cq}
+#| hold: true
+#| label: calculate-delta-cq
+# Calculate delta Cq by subtracting the programmatically-identified normalizing gene's
+# Cq.Mean from each corresponding Sample Cq.Mean (see `normalizing_gene` above)
+delta_Cq_df <- calculate_delta_Cq(grouped_df, normalizing_gene)
+
+# Samples where the normalizing gene has no valid Cq.Mean (missing or QC-dropped) cannot
+# be normalized -- calculate_delta_Cq() marks these rows NA_real_ rather than erroring.
+# Drop them here and report how many sample-gene combinations were lost, since the
+# normalizing gene is no longer guaranteed to have complete coverage the way GAPDH did.
+n_before <- nrow(delta_Cq_df)
+delta_Cq_df <- delta_Cq_df %>%
+  filter(!is.na(delta_Cq))
+n_dropped <- n_before - nrow(delta_Cq_df)
+
+# Filter out the normalizing gene itself, since no need to compare it to itself
+delta_Cq_df <- delta_Cq_df %>%
+  filter(Target != normalizing_gene)
+
+cat("Normalizing gene used:", normalizing_gene, "\n")
+cat("Rows dropped for missing", normalizing_gene, "measurement:", n_dropped, "\n\n")
+str(delta_Cq_df)
+```
+
+## Missing samples analysis
+
+```{r missing-samples-analysis}
+#| hold: true
+#| results: hold
+#| label: missing-samples-analysis
+
+# Get all unique sample names from the data that made it to delta_Cq_df
+available_samples <- delta_Cq_df %>%
+  dplyr::select(Sample, Target, treatment_group, polyIC, stress_type) %>%
+  distinct()
+
+# Expected samples based on the naming pattern
+# From the view-groups output, we know the expected samples
+expected_no_polyIC <- c(paste0(rep(LETTERS[1:4], each=5), rep(1:5, 4), "C"),
+                        paste0(rep(LETTERS[1:4], each=5), rep(1:5, 4), "T"),
+                        paste0(rep(LETTERS[1:4], each=5), rep(1:5, 4), "M"))
+
+expected_polyIC <- c(paste0(rep(LETTERS[1:4], each=5), rep(1:5, 4), "PC"),
+                     paste0(rep(LETTERS[1:4], each=5), rep(1:5, 4), "PT"),
+                     paste0(rep(LETTERS[1:4], each=5), rep(1:5, 4), "PM"))
+
+all_expected_samples <- c(expected_no_polyIC, expected_polyIC)
+
+# Get all genes
+all_genes <- unique(delta_Cq_df$Target)
+
+# Create expected sample-gene combinations
+expected_combinations <- expand.grid(
+  Sample = all_expected_samples,
+  Target = all_genes,
+  stringsAsFactors = FALSE
+)
+
+# Find missing combinations
+actual_combinations <- delta_Cq_df %>%
+  dplyr::select(Sample, Target) %>%
+  distinct()
+
+missing_combinations <- expected_combinations %>%
+  anti_join(actual_combinations, by = c("Sample", "Target"))
+
+# Summarize by treatment group and gene
+# Parse treatment info for missing samples
+missing_combinations_parsed <- missing_combinations %>%
+  mutate(
+    polyIC = ifelse(grepl("P", substr(Sample, nchar(Sample)-1, nchar(Sample))), "PolyIC", "No_PolyIC"),
+    stress_type = case_when(
+      grepl("C$", Sample) | grepl("PC$", Sample) ~ "Control",
+      grepl("T$", Sample) | grepl("PT$", Sample) ~ "Temperature",
+      grepl("M$", Sample) | grepl("PM$", Sample) ~ "Mechanical",
+      TRUE ~ "Unknown"
+    ),
+    treatment_group = paste(polyIC, stress_type, sep = "_")
+  )
+
+# Summary table
+cat("\n=== MISSING SAMPLES SUMMARY BY TREATMENT GROUP ===\n\n")
+missing_summary <- missing_combinations_parsed %>%
+  group_by(treatment_group, Target) %>%
+  summarise(n_missing = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = Target, values_from = n_missing, values_fill = 0) %>%
+  arrange(treatment_group)
+
+print(missing_summary)
+
+# Detailed list of missing samples
+cat("\n\n=== DETAILED LIST OF MISSING SAMPLES ===\n\n")
+cat("Total missing sample-gene combinations:", nrow(missing_combinations), "\n\n")
+
+missing_by_gene <- missing_combinations_parsed %>%
+  arrange(Target, treatment_group, Sample)
+
+for(gene in sort(unique(missing_by_gene$Target))) {
+  gene_missing <- missing_by_gene %>% filter(Target == gene)
+  if(nrow(gene_missing) > 0) {
+    cat("\n**", gene, "** (", nrow(gene_missing), " missing samples):\n", sep = "")
+    for(trt in unique(gene_missing$treatment_group)) {
+      samples <- gene_missing %>% filter(treatment_group == trt) %>% pull(Sample)
+      if(length(samples) > 0) {
+        cat("  ", trt, ": ", paste(samples, collapse = ", "), "\n", sep = "")
+      }
+    }
+  }
+}
+
+# Comprehensive list of all problematic samples
+cat("\n\n=== ALL SAMPLES EXCLUDED OR MISSING FROM ANALYSIS ===\n\n")
+
+# Get samples that failed QC by gene
+cat("**Samples that Failed QC (high standard deviation > 0.5) by Gene:**\n\n")
+if(nrow(excluded_samples) > 0) {
+  failed_qc_by_gene <- excluded_samples %>%
+    arrange(Target, Sample)
+  
+  for(gene in unique(failed_qc_by_gene$Target)) {
+    gene_failed <- failed_qc_by_gene %>% filter(Target == gene) %>% pull(Sample)
+    cat("  ", gene, " (", length(gene_failed), " samples): ", paste(sort(gene_failed), collapse = ", "), "\n", sep = "")
+  }
+  
+  failed_qc_samples <- unique(excluded_samples$Sample)
+  cat("\n  Total unique samples that failed QC: ", length(failed_qc_samples), "\n", sep = "")
+  cat("  All failed QC samples: ", paste(sort(failed_qc_samples), collapse = ", "), "\n", sep = "")
+} else {
+  failed_qc_samples <- character(0)
+  cat("  No samples failed QC.\n")
+}
+
+# Get unique samples that are missing
+missing_sample_names <- unique(missing_combinations$Sample)
+
+cat("\n**Missing from data (never run/loaded):** ", length(missing_sample_names), " unique samples\n", sep = "")
+if(length(missing_sample_names) > 0) {
+  cat("  ", paste(sort(missing_sample_names), collapse = ", "), "\n")
+}
+
+# Combine and get all unique
+all_problematic_samples <- unique(c(failed_qc_samples, missing_sample_names))
+
+cat("\n**Summary:**\n")
+cat("  Total unique samples with issues: ", length(all_problematic_samples), "\n", sep = "")
+cat("  All unique sample names (failed QC + missing): ", paste(sort(all_problematic_samples), collapse = ", "), "\n", sep = "")
+```
+
+## Normalizing Gene Impact Analysis
+
+```{r normalizing-gene-impact-analysis}
+#| hold: true
+#| results: hold
+#| label: normalizing-gene-impact-analysis
+
+cat("\n=== ", toupper(normalizing_gene), " QC FAILURES AND THEIR CASCADE EFFECTS ===\n\n", sep = "")
+
+# Get samples where the normalizing gene passed QC
+normalizer_passed <- grouped_df %>%
+  filter(Target == normalizing_gene) %>%
+  dplyr::select(Sample) %>%
+  distinct() %>%
+  pull(Sample)
+
+# Get samples where genes of interest (everything except the normalizer) passed QC
+genes_of_interest <- grouped_df %>%
+  filter(Target != normalizing_gene) %>%
+  dplyr::select(Sample, Target) %>%
+  distinct()
+
+# Find samples that have gene data but missing the normalizing gene
+samples_with_gene_but_no_normalizer <- genes_of_interest %>%
+  filter(!Sample %in% normalizer_passed) %>%
+  arrange(Sample, Target)
+
+if(nrow(samples_with_gene_but_no_normalizer) > 0) {
+  cat("**Samples with good gene measurements but failed/missing", normalizing_gene, ":**\n")
+  cat("(These samples CANNOT be normalized and are excluded from analysis)\n\n")
+  
+  # Count by sample
+  sample_counts <- samples_with_gene_but_no_normalizer %>%
+    group_by(Sample) %>%
+    summarise(n_genes_lost = n(), .groups = "drop") %>%
+    arrange(desc(n_genes_lost), Sample)
+  
+  cat("Total samples affected:", nrow(sample_counts), "\n")
+  cat("Total gene measurements lost:", nrow(samples_with_gene_but_no_normalizer), "\n\n")
+  
+  # Detailed breakdown
+  for(i in 1:nrow(sample_counts)) {
+    samp <- sample_counts$Sample[i]
+    genes_lost <- samples_with_gene_but_no_normalizer %>%
+      filter(Sample == samp) %>%
+      pull(Target)
+    cat("  ", samp, " (", sample_counts$n_genes_lost[i], " genes lost): ", 
+        paste(genes_lost, collapse = ", "), "\n", sep = "")
+  }
+} else {
+  cat("**Good news!** All samples with gene measurements also have valid", normalizing_gene, ".\n")
+}
+
+# Check if the normalizing gene itself failed QC for any samples
+normalizer_failed_qc <- excluded_samples %>%
+  filter(Target == normalizing_gene) %>%
+  pull(Sample) %>%
+  unique()
+
+if(length(normalizer_failed_qc) > 0) {
+  cat("\n\n**", normalizing_gene, " samples that failed QC (Std Dev > 0.5):** ", length(normalizer_failed_qc), " samples\n", sep = "")
+  cat("  ", paste(sort(normalizer_failed_qc), collapse = ", "), "\n", sep = "")
+  cat("\nNote: These", normalizing_gene, "failures prevent normalization for ALL genes in these samples,\n")
+  cat("even if those genes had good quality measurements.\n")
+} else {
+  cat("\n\n**No", normalizing_gene, "samples failed QC.**\n")
+}
+
+# Identify which "missing" samples in the final analysis are due to normalizing-gene issues
+cat("\n\n**Analysis of 'Missing' Samples:**\n\n")
+
+# Get samples that made it to grouped_df (passed initial QC)
+all_passed_qc <- grouped_df %>%
+  dplyr::select(Sample, Target) %>%
+  distinct()
+
+# For each "missing" sample in delta_Cq_df, check if the gene passed QC but the
+# normalizing gene didn't
+missing_due_to_normalizer <- missing_combinations %>%
+  inner_join(all_passed_qc, by = c("Sample", "Target")) %>%
+  filter(!Sample %in% normalizer_passed)
+
+if(nrow(missing_due_to_normalizer) > 0) {
+  cat("Gene measurements lost due to ", normalizing_gene, " failure/missing: ", nrow(missing_due_to_normalizer), " sample-gene combinations\n\n", sep = "")
+  
+  missing_normalizer_summary <- missing_due_to_normalizer %>%
+    group_by(Target) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    arrange(desc(n))
+  
+  cat("Breakdown by gene:\n")
+  for(i in 1:nrow(missing_normalizer_summary)) {
+    cat("  ", missing_normalizer_summary$Target[i], ": ", missing_normalizer_summary$n[i], " samples\n", sep = "")
+  }
+} else {
+  cat("None of the 'missing' samples are due to", normalizing_gene, "QC failures.\n")
+  cat("(They were never run/loaded for those genes)\n")
+}
+```
+
+
+# Statistical Comparisons
+
+## T-tests for treatment comparisons
+
+### Comparison 1: Basic Control vs Stressors (No PolyIC)
+
+```{r ttest-control-vs-stress-no-polyIC}
+#| hold: true
+#| results: hold
+#| label: ttest-control-vs-stress-no-polyIC
+# Filter data for samples without PolyIC treatment
+no_polyIC_data <- delta_Cq_df %>%
+  filter(polyIC == "No_PolyIC")
+
+# Perform t-tests for each target comparing Control vs each stressor
+comparison1_results <- no_polyIC_data %>%
+  filter(stress_type %in% c("Control", "Temperature", "Mechanical")) %>%
+  group_by(Target) %>%
+  summarise(
+    # Control vs Temperature
+    temp_pvalue = if(sum(stress_type == "Control") > 0 & sum(stress_type == "Temperature") > 0) {
+      t.test(delta_Cq[stress_type == "Control"], 
+             delta_Cq[stress_type == "Temperature"])$p.value
+    } else NA_real_,
+    
+    # Control vs Mechanical
+    mech_pvalue = if(sum(stress_type == "Control") > 0 & sum(stress_type == "Mechanical") > 0) {
+      t.test(delta_Cq[stress_type == "Control"], 
+             delta_Cq[stress_type == "Mechanical"])$p.value
+    } else NA_real_,
+    
+    .groups = 'drop'
+  )
+
+print(comparison1_results)
+```
+
+#### Significant genes (p ≤ 0.05)
+
+```{r sig-genes-no-polyIC}
+#| hold: true
+#| results: hold
+#| label: sig-genes-no-polyIC
+# Identify genes with significant p-values for Temperature comparison
+sig_temp <- comparison1_results %>%
+  ungroup() %>%
+  filter(temp_pvalue <= 0.05 & !is.na(temp_pvalue)) %>%
+  dplyr::select(Target, pvalue = temp_pvalue) %>%
+  mutate(comparison = "Control vs Temperature")
+
+# Identify genes with significant p-values for Mechanical comparison
+sig_mech <- comparison1_results %>%
+  ungroup() %>%
+  filter(mech_pvalue <= 0.05 & !is.na(mech_pvalue)) %>%
+  dplyr::select(Target, pvalue = mech_pvalue) %>%
+  mutate(comparison = "Control vs Mechanical")
+
+# Combine and display
+sig_genes_comp1 <- bind_rows(
+  sig_temp,
+  sig_mech
+)
+
+if(nrow(sig_genes_comp1) > 0) {
+  print("Genes with p ≤ 0.05:")
+  sig_genes_comp1 %>%
+    mutate(pvalue = format(pvalue, scientific = TRUE, digits = 3)) %>%
+    knitr::kable()
+} else {
+  print("No genes had p-values ≤ 0.05")
+}
+```
+
+#### Delta Cq boxplot
+
+```{r boxplot-no-polyIC}
+#| hold: true
+#| label: boxplot-no-polyIC
+#| fig.width: 10
+#| fig.height: 6
+
+# Prepare significance annotations from t-test results
+if(exists("sig_genes_comp1") && nrow(sig_genes_comp1) > 0) {
+  # Extract significant genes for Temperature
+  sig_temp_genes <- sig_genes_comp1 %>%
+    filter(comparison == "Control vs Temperature") %>%
+    pull(Target)
+  
+  # Extract significant genes for Mechanical
+  sig_mech_genes <- sig_genes_comp1 %>%
+    filter(comparison == "Control vs Mechanical") %>%
+    pull(Target)
+  
+  # Create annotation data
+  sig_annotations_comp1 <- data.frame(
+    Target = character(),
+    stress_type = character(),
+    label = character(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Add Temperature annotations
+  if(length(sig_temp_genes) > 0) {
+    sig_annotations_comp1 <- rbind(sig_annotations_comp1,
+      data.frame(Target = sig_temp_genes,
+                 stress_type = "Temperature",
+                 label = "*"))
+  }
+  
+  # Add Mechanical annotations
+  if(length(sig_mech_genes) > 0) {
+    sig_annotations_comp1 <- rbind(sig_annotations_comp1,
+      data.frame(Target = sig_mech_genes,
+                 stress_type = "Mechanical",
+                 label = "*"))
+  }
+  
+  # Get y positions for annotations
+  if(nrow(sig_annotations_comp1) > 0) {
+    y_pos_comp1 <- no_polyIC_data %>%
+      group_by(Target, stress_type) %>%
+      summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+    
+    # Calculate data range for each gene to use a proportional offset -- a flat
+    # offset doesn't scale across genes whose delta_Cq ranges differ substantially
+    # under facet_wrap's free_y scales
+    y_range_comp1 <- no_polyIC_data %>%
+      group_by(Target) %>%
+      summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+    
+    sig_annotations_comp1 <- sig_annotations_comp1 %>%
+      left_join(y_pos_comp1, by = c("Target", "stress_type")) %>%
+      left_join(y_range_comp1, by = "Target") %>%
+      mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
+  }
+} else {
+  sig_annotations_comp1 <- data.frame()
+}
+
+# Create plot
+p <- no_polyIC_data %>%
+  ggplot(aes(x = stress_type, y = delta_Cq, fill = stress_type)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_wrap(~Target, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +  # Extra space at top for annotations
+  theme_bw() +
+  labs(
+    title = "Delta Cq: Control vs Stressors (No PolyIC Treatment)",
+    x = "Stress Type",
+    y = "Delta Cq",
+    fill = "Stress Type"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add annotations if any exist
+if(nrow(sig_annotations_comp1) > 0) {
+  p <- p + 
+    geom_text(data = sig_annotations_comp1, 
+              aes(x = stress_type, y = y_pos, label = label),
+              inherit.aes = FALSE, size = 4, vjust = 0, color = "darkorange") +
+    labs(subtitle = "Asterisks (*) indicate significant differences from Control (t-test p ≤ 0.05)",
+         caption = paste("Significant comparisons:", paste(unique(sig_genes_comp1$Target), collapse = ", ")))
+} else {
+  p <- p + labs(subtitle = "No significant differences detected in t-tests (all p > 0.05)")
+}
+
+print(p)
+```
+
+### Comparison 2: Basic Control vs PolyIC Control
+
+```{r ttest-control-vs-polyIC-control}
+#| hold: true
+#| results: hold
+#| label: ttest-control-vs-polyIC-control
+# Filter data for control samples only (with and without PolyIC)
+control_data <- delta_Cq_df %>%
+  filter(stress_type == "Control")
+
+# Perform t-tests for each target comparing No_PolyIC vs PolyIC controls
+comparison2_results <- control_data %>%
+  group_by(Target) %>%
+  summarise(
+    n_no_polyIC = sum(polyIC == "No_PolyIC"),
+    n_polyIC = sum(polyIC == "PolyIC"),
+    
+    pvalue = if(sum(polyIC == "No_PolyIC") > 0 & sum(polyIC == "PolyIC") > 0) {
+      t.test(delta_Cq[polyIC == "No_PolyIC"], 
+             delta_Cq[polyIC == "PolyIC"])$p.value
+    } else NA_real_,
+    
+    mean_no_polyIC = mean(delta_Cq[polyIC == "No_PolyIC"], na.rm = TRUE),
+    sd_no_polyIC = sd(delta_Cq[polyIC == "No_PolyIC"], na.rm = TRUE),
+    mean_polyIC = mean(delta_Cq[polyIC == "PolyIC"], na.rm = TRUE),
+    sd_polyIC = sd(delta_Cq[polyIC == "PolyIC"], na.rm = TRUE),
+    mean_diff = mean_polyIC - mean_no_polyIC,
+    
+    .groups = 'drop'
+  )
+
+print(comparison2_results)
+```
+
+#### Significant genes (p ≤ 0.05)
+
+```{r sig-genes-polyIC-control}
+#| hold: true
+#| results: hold
+#| label: sig-genes-polyIC-control
+# Identify genes with significant p-values
+sig_genes_comp2 <- comparison2_results %>%
+  filter(pvalue <= 0.05 & !is.na(pvalue)) %>%
+  dplyr::select(Target, pvalue)
+
+if(nrow(sig_genes_comp2) > 0) {
+  print("Genes with p ≤ 0.05:")
+  sig_genes_comp2 %>%
+    mutate(pvalue = format(pvalue, scientific = TRUE, digits = 3)) %>%
+    knitr::kable()
+} else {
+  print("No genes had p-values ≤ 0.05")
+}
+```
+
+#### Delta Cq boxplot
+
+```{r boxplot-control-comparison}
+#| hold: true
+#| label: boxplot-control-comparison
+#| fig.width: 10
+#| fig.height: 6
+
+# Prepare significance annotations from t-test results
+if(exists("sig_genes_comp2") && nrow(sig_genes_comp2) > 0) {
+  sig_annotations_comp2 <- data.frame(
+    Target = sig_genes_comp2$Target,
+    polyIC = "PolyIC",
+    label = "*",
+    stringsAsFactors = FALSE
+  )
+  
+  # Get y positions for annotations
+  y_pos_comp2 <- control_data %>%
+    group_by(Target, polyIC) %>%
+    summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
+  # Calculate data range for each gene to use a proportional offset -- a flat
+  # offset doesn't scale across genes whose delta_Cq ranges differ substantially
+  # under facet_wrap's free_y scales
+  y_range_comp2 <- control_data %>%
+    group_by(Target) %>%
+    summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
+  sig_annotations_comp2 <- sig_annotations_comp2 %>%
+    left_join(y_pos_comp2, by = c("Target", "polyIC")) %>%
+    left_join(y_range_comp2, by = "Target") %>%
+    mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
+} else {
+  sig_annotations_comp2 <- data.frame()
+}
+
+# Create plot
+p <- control_data %>%
+  ggplot(aes(x = polyIC, y = delta_Cq, fill = polyIC)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_wrap(~Target, scales = "free_y") +
+  scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +  # Extra space at top for annotations
+  theme_bw() +
+  labs(
+    title = "Delta Cq: Basic Control vs PolyIC Control",
+    x = "PolyIC Treatment",
+    y = "Delta Cq",
+    fill = "Treatment"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add annotations if any exist
+if(nrow(sig_annotations_comp2) > 0) {
+  p <- p + 
+    geom_text(data = sig_annotations_comp2, 
+              aes(x = polyIC, y = y_pos, label = label),
+              inherit.aes = FALSE, size = 4, vjust = 0, color = "darkorange") +
+    labs(subtitle = "Asterisks (*) indicate significant differences (t-test p ≤ 0.05)",
+         caption = paste("Genes with significant PolyIC effect:", paste(sig_genes_comp2$Target, collapse = ", ")))
+} else {
+  p <- p + labs(subtitle = "No significant differences detected in t-tests (all p > 0.05)")
+}
+
+print(p)
+```
+
+### Comparison 3: PolyIC Control vs PolyIC Stressors
+
+```{r ttest-polyIC-control-vs-stress}
+#| hold: true
+#| results: hold
+#| label: ttest-polyIC-control-vs-stress
+# Filter data for PolyIC samples only
+polyIC_data <- delta_Cq_df %>%
+  filter(polyIC == "PolyIC")
+
+# Perform t-tests for each target comparing PolyIC Control vs each stressor
+comparison3_results <- polyIC_data %>%
+  filter(stress_type %in% c("Control", "Temperature", "Mechanical")) %>%
+  group_by(Target) %>%
+  summarise(
+    # PolyIC Control vs Temperature
+    temp_pvalue = if(sum(stress_type == "Control") > 0 & sum(stress_type == "Temperature") > 0) {
+      t.test(delta_Cq[stress_type == "Control"], 
+             delta_Cq[stress_type == "Temperature"])$p.value
+    } else NA_real_,
+    
+    # PolyIC Control vs Mechanical
+    mech_pvalue = if(sum(stress_type == "Control") > 0 & sum(stress_type == "Mechanical") > 0) {
+      t.test(delta_Cq[stress_type == "Control"], 
+             delta_Cq[stress_type == "Mechanical"])$p.value
+    } else NA_real_,
+    
+    .groups = 'drop'
+  )
+
+print(comparison3_results)
+```
+
+#### Significant genes (p ≤ 0.05)
+
+```{r sig-genes-polyIC-stress}
+#| hold: true
+#| results: hold
+#| label: sig-genes-polyIC-stress
+# Identify genes with significant p-values for Temperature comparison
+sig_temp_polyIC <- comparison3_results %>%
+  filter(temp_pvalue <= 0.05 & !is.na(temp_pvalue)) %>%
+  dplyr::select(Target, pvalue = temp_pvalue) %>%
+  mutate(comparison = "PolyIC Control vs Temperature")
+
+# Identify genes with significant p-values for Mechanical comparison
+sig_mech_polyIC <- comparison3_results %>%
+  filter(mech_pvalue <= 0.05 & !is.na(mech_pvalue)) %>%
+  dplyr::select(Target, pvalue = mech_pvalue) %>%
+  mutate(comparison = "PolyIC Control vs Mechanical")
+
+# Combine and display
+sig_genes_comp3 <- bind_rows(
+  sig_temp_polyIC,
+  sig_mech_polyIC
+)
+
+if(nrow(sig_genes_comp3) > 0) {
+  print("Genes with p ≤ 0.05:")
+  sig_genes_comp3 %>%
+    mutate(pvalue = format(pvalue, scientific = TRUE, digits = 3)) %>%
+    knitr::kable()
+} else {
+  print("No genes had p-values ≤ 0.05")
+}
+```
+
+#### Delta Cq boxplot
+
+```{r boxplot-polyIC-stress}
+#| hold: true
+#| label: boxplot-polyIC-stress
+#| fig.width: 10
+#| fig.height: 6
+
+# Prepare significance annotations from t-test results
+if(exists("sig_genes_comp3") && nrow(sig_genes_comp3) > 0) {
+  # Extract significant genes for Temperature
+  sig_temp_genes <- sig_genes_comp3 %>%
+    filter(comparison == "PolyIC Control vs Temperature") %>%
+    pull(Target)
+  
+  # Extract significant genes for Mechanical
+  sig_mech_genes <- sig_genes_comp3 %>%
+    filter(comparison == "PolyIC Control vs Mechanical") %>%
+    pull(Target)
+  
+  # Create annotation data
+  sig_annotations_comp3 <- data.frame(
+    Target = character(),
+    stress_type = character(),
+    label = character(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Add Temperature annotations
+  if(length(sig_temp_genes) > 0) {
+    sig_annotations_comp3 <- rbind(sig_annotations_comp3,
+      data.frame(Target = sig_temp_genes,
+                 stress_type = "Temperature",
+                 label = "*"))
+  }
+  
+  # Add Mechanical annotations
+  if(length(sig_mech_genes) > 0) {
+    sig_annotations_comp3 <- rbind(sig_annotations_comp3,
+      data.frame(Target = sig_mech_genes,
+                 stress_type = "Mechanical",
+                 label = "*"))
+  }
+  
+  # Get y positions for annotations
+  if(nrow(sig_annotations_comp3) > 0) {
+    y_pos_comp3 <- polyIC_data %>%
+      group_by(Target, stress_type) %>%
+      summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+    
+    # Calculate data range for each gene to use a proportional offset -- a flat
+    # offset doesn't scale across genes whose delta_Cq ranges differ substantially
+    # under facet_wrap's free_y scales
+    y_range_comp3 <- polyIC_data %>%
+      group_by(Target) %>%
+      summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+    
+    sig_annotations_comp3 <- sig_annotations_comp3 %>%
+      left_join(y_pos_comp3, by = c("Target", "stress_type")) %>%
+      left_join(y_range_comp3, by = "Target") %>%
+      mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
+  }
+} else {
+  sig_annotations_comp3 <- data.frame()
+}
+
+# Create plot
+p <- polyIC_data %>%
+  ggplot(aes(x = stress_type, y = delta_Cq, fill = stress_type)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_wrap(~Target, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "darkgray", "Temperature" = "salmon", "Mechanical" = "steelblue")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +  # Extra space at top for annotations
+  theme_bw() +
+  labs(
+    title = "Delta Cq: PolyIC Control vs PolyIC Stressors",
+    x = "Stress Type",
+    y = "Delta Cq",
+    fill = "Stress Type"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add annotations if any exist
+if(nrow(sig_annotations_comp3) > 0) {
+  p <- p + 
+    geom_text(data = sig_annotations_comp3, 
+              aes(x = stress_type, y = y_pos, label = label),
+              inherit.aes = FALSE, size = 4, vjust = 0, color = "darkorange") +
+    labs(subtitle = "Asterisks (*) indicate significant differences from PolyIC Control (t-test p ≤ 0.05)",
+         caption = paste("Significant comparisons:", paste(unique(sig_genes_comp3$Target), collapse = ", ")))
+} else {
+  p <- p + labs(subtitle = "No significant differences detected in t-tests (all p > 0.05)")
+}
+
+print(p)
+```
+
+## Create ANOVA Models
+
+Two-way ANOVA (PolyIC × Stress Type) for each gene to comprehensively test treatment effects and interactions.
+
+```{r anova-models-run}
+#| hold: true
+#| results: hold
+#| label: anova-models-run
+
+# Run ANOVA models for all genes and store emmeans objects for plotting
+# Detailed assumption checks and interpretations are in the "ANOVA Results and Diagnostics" section below
+
+# ATP Synthase
+model_atp <- delta_Cq_df %>%
+  filter(Target == "ATP.Synthase") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+if(any(summary(model_atp)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_atp <- emmeans(model_atp, ~ polyIC * stress_type)
+}
+
+# Citrate Synthase
+model_citrate <- delta_Cq_df %>%
+  filter(Target == "Citrate.Synthase") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+if(any(summary(model_citrate)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_citrate <- emmeans(model_citrate, ~ polyIC * stress_type)
+}
+
+# DNMT1
+model_dnmt1 <- delta_Cq_df %>%
+  filter(Target == "DNMT1") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+if(any(summary(model_dnmt1)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_dnmt1 <- emmeans(model_dnmt1, ~ polyIC * stress_type)
+}
+
+# HSP70
+model_hsp70 <- delta_Cq_df %>%
+  filter(Target == "HSP70") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+if(any(summary(model_hsp70)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_hsp70 <- emmeans(model_hsp70, ~ polyIC * stress_type)
+}
+
+# GAPDH (gene of interest here -- HSP90 is the normalizer and is excluded from
+# delta_Cq_df, so it is no longer one of the modeled genes)
+model_gapdh <- delta_Cq_df %>%
+  filter(Target == "GAPDH") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+if(any(summary(model_gapdh)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_gapdh <- emmeans(model_gapdh, ~ polyIC * stress_type)
+}
+
+
+# VIPERIN
+model_viperin <- delta_Cq_df %>%
+  filter(Target == "VIPERIN") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+if(any(summary(model_viperin)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_viperin <- emmeans(model_viperin, ~ polyIC * stress_type)
+}
+
+cat("ANOVA models created for all genes. Emmeans objects stored for post-hoc testing and plotting.\n")
+cat("See 'ANOVA Results and Diagnostics' section below for detailed results, assumption checks, and interpretations.\n")
+
+# Report which genes had at least one significant term (polyIC, stress_type, or their
+# interaction) -- these are the genes for which an emmeans object was created above.
+# This list is derived programmatically from the models just run (never hand-typed), since
+# it necessarily changes when the normalizing gene changes.
+all_genes_of_interest <- c("ATP.Synthase", "Citrate.Synthase", "DNMT1", "GAPDH",
+                            "HSP70", "cGAS", "VIPERIN")
+emm_var_names <- c(ATP.Synthase = "emm_atp", Citrate.Synthase = "emm_citrate",
+                   DNMT1 = "emm_dnmt1", GAPDH = "emm_gapdh", HSP70 = "emm_hsp70",
+                   VIPERIN = "emm_viperin")
+significant_genes <- all_genes_of_interest[sapply(emm_var_names[all_genes_of_interest], exists)]
+cat("\nGenes with >=1 significant ANOVA term (p < 0.05):", paste(significant_genes, collapse = ", "), "\n")
+```
+
+### All treatments comparison
+
+```{r boxplot-all-treatments}
+#| hold: true
+#| label: boxplot-all-treatments
+#| fig.width: 12
+#| fig.height: 8
+
+# Use emmeans objects created in the "Create ANOVA Models" section above.
+# Loop generically over `significant_genes` (the genes with >=1 significant ANOVA term,
+# derived programmatically there) rather than a hand-picked gene list, since that list
+# changes whenever the normalizing gene changes.
+all_treat_annotations <- data.frame()
+
+for (gene in significant_genes) {
+  emm_var <- emm_var_names[[gene]]
+  if (exists(emm_var)) {
+    cld_temp <- cld(get(emm_var), Letters = letters, alpha = 0.05)
+    cld_df <- as.data.frame(cld_temp)
+    cld_df$Target <- gene
+    cld_df$label <- trimws(cld_df$.group)
+    cld_df$treatment_group <- paste(cld_df$polyIC, cld_df$stress_type, sep = "_")
+    all_treat_annotations <- rbind(all_treat_annotations,
+                                   cld_df[, c("Target", "treatment_group", "label")])
+  }
+}
+
+# Calculate y positions if annotations exist
+if(nrow(all_treat_annotations) > 0) {
+  y_pos_all <- delta_Cq_df %>%
+    group_by(Target, treatment_group) %>%
+    summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
+  # Calculate data range for each gene to use proportional offset
+  y_range_all <- delta_Cq_df %>%
+    group_by(Target) %>%
+    summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
+  all_treat_annotations <- all_treat_annotations %>%
+    left_join(y_pos_all, by = c("Target", "treatment_group")) %>%
+    left_join(y_range_all, by = "Target") %>%
+    mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
+}
+
+# Create plot
+p <- delta_Cq_df %>%
+  ggplot(aes(x = treatment_group, y = delta_Cq, fill = polyIC)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 0.8) +
+  facet_wrap(~Target, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
+  theme_bw() +
+  labs(
+    title = "Delta Cq Across All Treatment Groups",
+    x = "Treatment Group",
+    y = "Delta Cq",
+    fill = "PolyIC"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add annotations if they exist
+if(nrow(all_treat_annotations) > 0) {
+  p <- p +
+    geom_text(data = all_treat_annotations,
+              aes(x = treatment_group, y = y_pos, label = label),
+              inherit.aes = FALSE, size = 4, vjust = 0, 
+              color = "darkorange", fontface = "bold") +
+    labs(subtitle = "Letters show statistical groupings (p ≤ 0.05). Groups sharing a letter are NOT significantly different from each other",
+         caption = "Compact Letter Display shown for genes with significant ANOVA effects. See ANOVA Models section for detailed statistics.")
+}
+
+print(p)
+```
+
+## ANOVA Results and Diagnostics
+
+Run ANOVA models to test for effects of PolyIC treatment and stress type on delta Cq values for each target gene.
+
+**Note:** ANOVA models were created in the Create ANOVA Models section above. This section provides detailed assumption checks and interpretations for each gene.
+
+### Data distribution check
+
+ANOVA assumes that data (or residuals) are approximately normally distributed. This histogram provides a quick visual check of the overall delta Cq distribution across all samples and targets.
+
+**What to look for:**
+
+- **Bell-shaped curve**: Indicates roughly normal distribution, supporting ANOVA use
+
+- **Skewness**: Strong left or right skew may violate normality assumptions
+
+- **Outliers**: Extreme values far from the main distribution
+
+- **Multimodal**: Multiple peaks may indicate distinct subpopulations
+
+While this shows the overall distribution, we'll check normality of residuals for each gene-specific model using QQ plots below.
+
+```{r delta-cq-histogram}
+#| hold: true
+#| label: delta-cq-histogram
+hist(delta_Cq_df$delta_Cq, main = "Distribution of Delta Cq Values", xlab = "Delta Cq")
+```
+
+### ATP Synthase
+
+ATP synthase is an enzyme complex that functions to synthesize adenosine triphosphate (ATP) from adenosine diphosphate (ADP) and inorganic phosphate (Pi), essentially generating the cell's primary energy currency by harnessing the energy from a proton gradient across a membrane.
+
+```{r anova-atp-synthase}
+#| hold: true
+#| label: anova-atp-synthase
+model_atp <- delta_Cq_df %>%
+  filter(Target == "ATP.Synthase") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+
+summary(model_atp)
+```
+
+#### Assumption Checks for ATP Synthase
+
+**QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
+
+- **What to look for**: Points should fall along the diagonal reference line
+- **Good fit**: Points closely follow the line, indicating normally distributed residuals
+- **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
+- **Minor deviations** at the ends are usually acceptable
+
+```{r anova-atp-synthase-qq}
+#| hold: true
+#| label: anova-atp-synthase-qq
+qqPlot(model_atp$residuals)
+```
+
+**Levene's Test**: Tests homogeneity of variance (equal variances across groups).
+
+- **Null hypothesis**: Variances are equal across all treatment groups
+- **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
+- **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
+
+```{r anova-atp-synthase-levene}
+#| results: hold
+#| label: anova-atp-synthase-levene
+leveneTest(model_atp$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "ATP.Synthase"))
+
+# If significant effects found, run post-hoc tests
+if(any(summary(model_atp)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_atp <- emmeans(model_atp, ~ polyIC * stress_type)
+  pairs_atp <- pairs(emm_atp)
+  print(pairs_atp)
+  
+  # Identify significant contrasts
+  pairs_df <- as.data.frame(pairs_atp)
+  sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
+  
+  cat("\n**ATP Synthase - Pairwise Contrast Summary:**\n\n")
+  if(nrow(sig_contrasts) > 0) {
+    cat("Significant contrasts (p ≤ 0.05):\n")
+    for(i in 1:nrow(sig_contrasts)) {
+      cat("-", sig_contrasts$contrast[i], "(p =", round(sig_contrasts$p.value[i], 4), ")\n")
+    }
+  } else {
+    cat("No significant pairwise contrasts found (all p > 0.05).\n")
+  }
+} else {
+  cat("No significant effects found; post-hoc tests not performed.\n")
+}
+```
+
+#### ATP Synthase ANOVA Interpretation
+
+```{r anova-atp-synthase-interpret}
+#| hold: true
+#| results: hold
+#| label: anova-atp-synthase-interpret
+anova_results <- summary(model_atp)[[1]]
+# Fix: Trim whitespace from rownames
+rownames(anova_results) <- trimws(rownames(anova_results))
+
+levene_results <- leveneTest(model_atp$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "ATP.Synthase"))
+
+cat("**ATP Synthase ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect ATP Synthase expression (delta Cq).\n\n")
+
+cat("**Treatment Effects (ANOVA):**\n\n")
+
+# Check main effects and interaction
+if(anova_results["polyIC", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC effect**: SIGNIFICANT (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **PolyIC effect**: Not significant (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **Stress type effect**: SIGNIFICANT (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **Stress type effect**: Not significant (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["polyIC:stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC × Stress interaction**: SIGNIFICANT (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+  cat("  → The effect of stress depends on PolyIC treatment status.\n")
+} else {
+  cat("- **PolyIC × Stress interaction**: Not significant (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+cat("\n**Assumption Checks:**\n\n")
+
+# Check Levene's test
+levene_p <- levene_results$`Pr(>F)`[1]
+if(levene_p > 0.05) {
+  cat("- **Levene's Test** (homogeneity of variance): PASSED (p =", round(levene_p, 4), ") ✓\n")
+  cat("  → Variances are equal across groups; ANOVA is appropriate.\n")
+} else {
+  cat("- **Levene's Test** (homogeneity of variance): FAILED (p =", round(levene_p, 4), ") ⚠️\n")
+  cat("  → Variances differ across groups; ANOVA results should be interpreted with caution.\n")
+}
+```
+
+### Citrate Synthase
+
+Citrate synthase is important for energy production in the TCA cycle and is linked to the electron transport chain. It is also used as an enzyme marker for intact mitochondria.
+
+```{r anova-citrate-synthase}
+#| hold: true
+#| label: anova-citrate-synthase
+model_citrate <- delta_Cq_df %>%
+  filter(Target == "Citrate.Synthase") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+
+summary(model_citrate)
+```
+
+#### Assumption Checks for Citrate Synthase
+
+**QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
+
+- **What to look for**: Points should fall along the diagonal reference line
+- **Good fit**: Points closely follow the line, indicating normally distributed residuals
+- **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
+- **Minor deviations** at the ends are usually acceptable
+
+```{r anova-citrate-synthase-qq}
+#| hold: true
+#| label: anova-citrate-synthase-qq
+qqPlot(model_citrate$residuals)
+```
+
+**Levene's Test**: Tests homogeneity of variance (equal variances across groups).
+
+- **Null hypothesis**: Variances are equal across all treatment groups
+- **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
+- **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
+
+```{r anova-citrate-synthase-levene}
+#| results: hold
+#| label: anova-citrate-synthase-levene
+leveneTest(model_citrate$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "Citrate.Synthase"))
+
+# If significant effects found, run post-hoc tests
+if(any(summary(model_citrate)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_citrate <- emmeans(model_citrate, ~ polyIC * stress_type)
+  pairs_citrate <- pairs(emm_citrate)
+  print(pairs_citrate)
+  
+  # Identify significant contrasts
+  pairs_df <- as.data.frame(pairs_citrate)
+  sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
+  
+  cat("\n**Citrate Synthase - Pairwise Contrast Summary:**\n\n")
+  if(nrow(sig_contrasts) > 0) {
+    cat("Significant contrasts (p ≤ 0.05):\n")
+    for(i in 1:nrow(sig_contrasts)) {
+      cat("-", sig_contrasts$contrast[i], "(p =", round(sig_contrasts$p.value[i], 4), ")\n")
+    }
+  } else {
+    cat("No significant pairwise contrasts found (all p > 0.05).\n")
+  }
+} else {
+  cat("No significant effects found; post-hoc tests not performed.\n")
+}
+```
+
+#### Citrate Synthase ANOVA Interpretation
+
+```{r anova-citrate-synthase-interpret}
+#| hold: true
+#| results: hold
+#| label: anova-citrate-synthase-interpret
+anova_results <- summary(model_citrate)[[1]]
+# Fix: Trim whitespace from rownames
+rownames(anova_results) <- trimws(rownames(anova_results))
+
+levene_results <- leveneTest(model_citrate$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "Citrate.Synthase"))
+
+cat("**Citrate Synthase ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect Citrate Synthase expression (delta Cq).\n\n")
+
+cat("**Treatment Effects (ANOVA):**\n\n")
+
+if(anova_results["polyIC", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC effect**: SIGNIFICANT (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **PolyIC effect**: Not significant (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **Stress type effect**: SIGNIFICANT (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **Stress type effect**: Not significant (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["polyIC:stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC × Stress interaction**: SIGNIFICANT (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+  cat("  → The effect of stress depends on PolyIC treatment status.\n")
+} else {
+  cat("- **PolyIC × Stress interaction**: Not significant (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+cat("\n**Assumption Checks:**\n\n")
+
+levene_p <- levene_results$`Pr(>F)`[1]
+if(levene_p > 0.05) {
+  cat("- **Levene's Test** (homogeneity of variance): PASSED (p =", round(levene_p, 4), ") ✓\n")
+  cat("  → Variances are equal across groups; ANOVA is appropriate.\n")
+} else {
+  cat("- **Levene's Test** (homogeneity of variance): FAILED (p =", round(levene_p, 4), ") ⚠️\n")
+  cat("  → Variances differ across groups; ANOVA results should be interpreted with caution.\n")
+}
+```
+
+### DNMT1
+
+The DNMT1 gene provides instructions for making an enzyme called DNA methyltransferase 1. This enzyme is involved in DNA methylation, which is the addition of methyl groups, consisting of one carbon atom and three hydrogen atoms, to DNA molecules.
+
+```{r anova-dnmt1}
+#| hold: true
+#| label: anova-dnmt1
+model_dnmt1 <- delta_Cq_df %>%
+  filter(Target == "DNMT1") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+
+summary(model_dnmt1)
+```
+
+#### Assumption Checks for DNMT1
+
+**QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
+
+- **What to look for**: Points should fall along the diagonal reference line
+- **Good fit**: Points closely follow the line, indicating normally distributed residuals
+- **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
+- **Minor deviations** at the ends are usually acceptable
+
+```{r anova-dnmt1-qq}
+#| hold: true
+#| label: anova-dnmt1-qq
+qqPlot(model_dnmt1$residuals)
+```
+
+**Levene's Test**: Tests homogeneity of variance (equal variances across groups).
+
+- **Null hypothesis**: Variances are equal across all treatment groups
+- **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
+- **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
+
+```{r anova-dnmt1-levene}
+#| results: hold
+#| label: anova-dnmt1-levene
+leveneTest(model_dnmt1$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "DNMT1"))
+
+# If significant effects found, run post-hoc tests
+if(any(summary(model_dnmt1)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_dnmt1 <- emmeans(model_dnmt1, ~ polyIC * stress_type)
+  pairs_dnmt1 <- pairs(emm_dnmt1)
+  print(pairs_dnmt1)
+  
+  # Identify significant contrasts
+  pairs_df <- as.data.frame(pairs_dnmt1)
+  sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
+  
+  cat("\n**DNMT1 - Pairwise Contrast Summary:**\n\n")
+  if(nrow(sig_contrasts) > 0) {
+    cat("Significant contrasts (p ≤ 0.05):\n")
+    for(i in 1:nrow(sig_contrasts)) {
+      cat("-", sig_contrasts$contrast[i], "(p =", round(sig_contrasts$p.value[i], 4), ")\n")
+    }
+  } else {
+    cat("No significant pairwise contrasts found (all p > 0.05).\n")
+  }
+} else {
+  cat("No significant effects found; post-hoc tests not performed.\n")
+}
+```
+
+#### DNMT1 ANOVA Interpretation
+
+```{r anova-dnmt1-interpret}
+#| hold: true
+#| results: hold
+#| label: anova-dnmt1-interpret
+anova_results <- summary(model_dnmt1)[[1]]
+# Fix: Trim whitespace from rownames
+rownames(anova_results) <- trimws(rownames(anova_results))
+
+levene_results <- leveneTest(model_dnmt1$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "DNMT1"))
+
+cat("**DNMT1 ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect DNMT1 expression (delta Cq).\n\n")
+
+cat("**Treatment Effects (ANOVA):**\n\n")
+
+if(anova_results["polyIC", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC effect**: SIGNIFICANT (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **PolyIC effect**: Not significant (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **Stress type effect**: SIGNIFICANT (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **Stress type effect**: Not significant (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["polyIC:stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC × Stress interaction**: SIGNIFICANT (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+  cat("  → The effect of stress depends on PolyIC treatment status.\n")
+} else {
+  cat("- **PolyIC × Stress interaction**: Not significant (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+cat("\n**Assumption Checks:**\n\n")
+
+levene_p <- levene_results$`Pr(>F)`[1]
+if(levene_p > 0.05) {
+  cat("- **Levene's Test** (homogeneity of variance): PASSED (p =", round(levene_p, 4), ") ✓\n")
+  cat("  → Variances are equal across groups; ANOVA is appropriate.\n")
+} else {
+  cat("- **Levene's Test** (homogeneity of variance): FAILED (p =", round(levene_p, 4), ") ⚠️\n")
+  cat("  → Variances differ across groups; ANOVA results should be interpreted with caution.\n")
+}
+```
+
+### HSP70
+
+Heat Shock Protein 70 (Hsp70) is a molecular chaperone that plays crucial roles in maintaining cellular protein homeostasis and protecting cells from stress.
+
+```{r anova-hsp70}
+#| hold: true
+#| label: anova-hsp70
+model_hsp70 <- delta_Cq_df %>%
+  filter(Target == "HSP70") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+
+summary(model_hsp70)
+```
+
+#### Assumption Checks for HSP70
+
+**QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
+
+- **What to look for**: Points should fall along the diagonal reference line
+- **Good fit**: Points closely follow the line, indicating normally distributed residuals
+- **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
+- **Minor deviations** at the ends are usually acceptable
+
+```{r anova-hsp70-qq}
+#| hold: true
+#| label: anova-hsp70-qq
+qqPlot(model_hsp70$residuals)
+```
+
+**Levene's Test**: Tests homogeneity of variance (equal variances across groups).
+
+- **Null hypothesis**: Variances are equal across all treatment groups
+- **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
+- **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
+
+```{r anova-hsp70-levene}
+#| results: hold
+#| label: anova-hsp70-levene
+leveneTest(model_hsp70$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "HSP70"))
+
+# If significant effects found, run post-hoc tests
+if(any(summary(model_hsp70)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_hsp70 <- emmeans(model_hsp70, ~ polyIC * stress_type)
+  pairs_hsp70 <- pairs(emm_hsp70)
+  print(pairs_hsp70)
+  
+  # Identify significant contrasts
+  pairs_df <- as.data.frame(pairs_hsp70)
+  sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
+  
+  cat("\n**HSP70 - Pairwise Contrast Summary:**\n\n")
+  if(nrow(sig_contrasts) > 0) {
+    cat("Significant contrasts (p ≤ 0.05):\n")
+    for(i in 1:nrow(sig_contrasts)) {
+      cat("-", sig_contrasts$contrast[i], "(p =", round(sig_contrasts$p.value[i], 4), ")\n")
+    }
+  } else {
+    cat("No significant pairwise contrasts found (all p > 0.05).\n")
+  }
+} else {
+  cat("No significant effects found; post-hoc tests not performed.\n")
+}
+```
+
+#### HSP70 ANOVA Interpretation
+
+```{r anova-hsp70-interpret}
+#| hold: true
+#| results: hold
+#| label: anova-hsp70-interpret
+anova_results <- summary(model_hsp70)[[1]]
+# Fix: Trim whitespace from rownames
+rownames(anova_results) <- trimws(rownames(anova_results))
+
+levene_results <- leveneTest(model_hsp70$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "HSP70"))
+
+cat("**HSP70 ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect HSP70 expression (delta Cq).\n\n")
+
+cat("**Treatment Effects (ANOVA):**\n\n")
+
+if(anova_results["polyIC", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC effect**: SIGNIFICANT (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **PolyIC effect**: Not significant (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **Stress type effect**: SIGNIFICANT (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **Stress type effect**: Not significant (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["polyIC:stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC × Stress interaction**: SIGNIFICANT (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+  cat("  → The effect of stress depends on PolyIC treatment status.\n")
+} else {
+  cat("- **PolyIC × Stress interaction**: Not significant (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+cat("\n**Assumption Checks:**\n\n")
+
+levene_p <- levene_results$`Pr(>F)`[1]
+if(levene_p > 0.05) {
+  cat("- **Levene's Test** (homogeneity of variance): PASSED (p =", round(levene_p, 4), ") ✓\n")
+  cat("  → Variances are equal across groups; ANOVA is appropriate.\n")
+} else {
+  cat("- **Levene's Test** (homogeneity of variance): FAILED (p =", round(levene_p, 4), ") ⚠️\n")
+  cat("  → Variances differ across groups; ANOVA results should be interpreted with caution.\n")
+}
+```
+
+### GAPDH
+
+Glyceraldehyde-3-phosphate dehydrogenase (GAPDH) is a glycolytic enzyme commonly used as a reference/housekeeping gene in qPCR studies. It is evaluated here as a gene of interest because it was the previous normalizing-gene candidate but was excluded from that role (see the Normalizing Gene Candidate Ranking section) after showing a significant treatment effect in the raw-Cq ANOVA.
+
+```{r anova-gapdh}
+#| hold: true
+#| label: anova-gapdh
+model_gapdh <- delta_Cq_df %>%
+  filter(Target == "GAPDH") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+
+summary(model_gapdh)
+```
+
+#### Assumption Checks for GAPDH
+
+**QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
+
+- **What to look for**: Points should fall along the diagonal reference line
+- **Good fit**: Points closely follow the line, indicating normally distributed residuals
+- **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
+- **Minor deviations** at the ends are usually acceptable
+
+```{r anova-gapdh-qq}
+#| hold: true
+#| label: anova-gapdh-qq
+qqPlot(model_gapdh$residuals)
+```
+
+**Levene's Test**: Tests homogeneity of variance (equal variances across groups).
+
+- **Null hypothesis**: Variances are equal across all treatment groups
+- **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
+- **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
+
+```{r anova-gapdh-levene}
+#| results: hold
+#| label: anova-gapdh-levene
+leveneTest(model_gapdh$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "GAPDH"))
+
+# If significant effects found, run post-hoc tests
+if(any(summary(model_gapdh)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_gapdh <- emmeans(model_gapdh, ~ polyIC * stress_type)
+  pairs_gapdh <- pairs(emm_gapdh)
+  print(pairs_gapdh)
+  
+  # Identify significant contrasts
+  pairs_df <- as.data.frame(pairs_gapdh)
+  sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
+  
+  cat("\n**GAPDH - Pairwise Contrast Summary:**\n\n")
+  if(nrow(sig_contrasts) > 0) {
+    cat("Significant contrasts (p ≤ 0.05):\n")
+    for(i in 1:nrow(sig_contrasts)) {
+      cat("-", sig_contrasts$contrast[i], "(p =", round(sig_contrasts$p.value[i], 4), ")\n")
+    }
+  } else {
+    cat("No significant pairwise contrasts found (all p > 0.05).\n")
+  }
+} else {
+  cat("No significant effects found; post-hoc tests not performed.\n")
+}
+```
+
+#### GAPDH ANOVA Interpretation
+
+```{r anova-gapdh-interpret}
+#| hold: true
+#| results: hold
+#| label: anova-gapdh-interpret
+anova_results <- summary(model_gapdh)[[1]]
+# Fix: Trim whitespace from rownames
+rownames(anova_results) <- trimws(rownames(anova_results))
+
+levene_results <- leveneTest(model_gapdh$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "GAPDH"))
+
+cat("**GAPDH ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect GAPDH expression (delta Cq).\n\n")
+
+cat("**Treatment Effects (ANOVA):**\n\n")
+
+if(anova_results["polyIC", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC effect**: SIGNIFICANT (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **PolyIC effect**: Not significant (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **Stress type effect**: SIGNIFICANT (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **Stress type effect**: Not significant (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["polyIC:stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC × Stress interaction**: SIGNIFICANT (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+  cat("  → The effect of stress depends on PolyIC treatment status.\n")
+} else {
+  cat("- **PolyIC × Stress interaction**: Not significant (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+cat("\n**Assumption Checks:**\n\n")
+
+levene_p <- levene_results$`Pr(>F)`[1]
+if(levene_p > 0.05) {
+  cat("- **Levene's Test** (homogeneity of variance): PASSED (p =", round(levene_p, 4), ") ✓\n")
+  cat("  → Variances are equal across groups; ANOVA is appropriate.\n")
+} else {
+  cat("- **Levene's Test** (homogeneity of variance): FAILED (p =", round(levene_p, 4), ") ⚠️\n")
+  cat("  → Variances differ across groups; ANOVA results should be interpreted with caution.\n")
+}
+```
+
+### VIPERIN
+
+Viperin limits replication of DNA and RNA viruses.
+
+```{r anova-viperin}
+#| hold: true
+#| label: anova-viperin
+model_viperin <- delta_Cq_df %>%
+  filter(Target == "VIPERIN") %>%
+  aov(delta_Cq ~ polyIC * stress_type, data = .)
+
+summary(model_viperin)
+```
+
+#### Assumption Checks for VIPERIN
+
+**QQ Plot (Quantile-Quantile Plot)**: Tests normality assumption of residuals.
+
+- **What to look for**: Points should fall along the diagonal reference line
+- **Good fit**: Points closely follow the line, indicating normally distributed residuals
+- **Violations**: Systematic deviations (S-curves, heavy tails) suggest non-normality
+- **Minor deviations** at the ends are usually acceptable
+
+```{r anova-viperin-qq}
+#| hold: true
+#| label: anova-viperin-qq
+qqPlot(model_viperin$residuals)
+```
+
+**Levene's Test**: Tests homogeneity of variance (equal variances across groups).
+
+- **Null hypothesis**: Variances are equal across all treatment groups
+- **p-value > 0.05**: Variances are homogeneous (assumption met) ✓
+- **p-value ≤ 0.05**: Variances differ significantly (assumption violated)
+
+```{r anova-viperin-levene}
+#| results: hold
+#| label: anova-viperin-levene
+leveneTest(model_viperin$residuals ~ polyIC * stress_type, 
+           data = delta_Cq_df %>% filter(Target == "VIPERIN"))
+
+# If significant effects found, run post-hoc tests
+if(any(summary(model_viperin)[[1]][["Pr(>F)"]][1:3] < 0.05, na.rm = TRUE)) {
+  emm_viperin <- emmeans(model_viperin, ~ polyIC * stress_type)
+  pairs_viperin <- pairs(emm_viperin)
+  print(pairs_viperin)
+  
+  # Identify significant contrasts
+  pairs_df <- as.data.frame(pairs_viperin)
+  sig_contrasts <- pairs_df[pairs_df$p.value <= 0.05, ]
+  
+  cat("\n**VIPERIN - Pairwise Contrast Summary:**\n\n")
+  if(nrow(sig_contrasts) > 0) {
+    cat("Significant contrasts (p ≤ 0.05):\n")
+    for(i in 1:nrow(sig_contrasts)) {
+      cat("-", sig_contrasts$contrast[i], "(p =", round(sig_contrasts$p.value[i], 4), ")\n")
+    }
+  } else {
+    cat("No significant pairwise contrasts found (all p > 0.05).\n")
+  }
+} else {
+  cat("No significant effects found; post-hoc tests not performed.\n")
+}
+```
+
+#### VIPERIN ANOVA Interpretation
+
+```{r anova-viperin-interpret}
+#| hold: true
+#| results: hold
+#| label: anova-viperin-interpret
+anova_results <- summary(model_viperin)[[1]]
+# Fix: Trim whitespace from rownames
+rownames(anova_results) <- trimws(rownames(anova_results))
+
+levene_results <- leveneTest(model_viperin$residuals ~ polyIC * stress_type, 
+                              data = delta_Cq_df %>% filter(Target == "VIPERIN"))
+
+cat("**VIPERIN ANOVA Results:**\n\n")
+cat("This ANOVA evaluates whether PolyIC treatment and/or stress type affect VIPERIN expression (delta Cq).\n\n")
+
+cat("**Treatment Effects (ANOVA):**\n\n")
+
+if(anova_results["polyIC", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC effect**: SIGNIFICANT (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **PolyIC effect**: Not significant (p =", round(anova_results["polyIC", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **Stress type effect**: SIGNIFICANT (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+} else {
+  cat("- **Stress type effect**: Not significant (p =", round(anova_results["stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+if(anova_results["polyIC:stress_type", "Pr(>F)"] < 0.05) {
+  cat("- **PolyIC × Stress interaction**: SIGNIFICANT (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+  cat("  → The effect of stress depends on PolyIC treatment status.\n")
+} else {
+  cat("- **PolyIC × Stress interaction**: Not significant (p =", round(anova_results["polyIC:stress_type", "Pr(>F)"], 4), ")\n")
+}
+
+cat("\n**Assumption Checks:**\n\n")
+
+levene_p <- levene_results$`Pr(>F)`[1]
+if(levene_p > 0.05) {
+  cat("- **Levene's Test** (homogeneity of variance): PASSED (p =", round(levene_p, 4), ") ✓\n")
+  cat("  → Variances are equal across groups; ANOVA is appropriate.\n")
+} else {
+  cat("- **Levene's Test** (homogeneity of variance): FAILED (p =", round(levene_p, 4), ") ⚠️\n")
+  cat("  → Variances differ across groups; ANOVA results should be interpreted with caution.\n")
+}
+```
+
+### Summary Plots
+
+Visualize delta Cq values by treatment group for each target.
+
+```{r anova-summary-plots}
+#| hold: true
+#| label: anova-summary-plots
+#| fig.width: 12
+#| fig.height: 10
+
+# Generate Compact Letter Display (CLD) for each gene with significant effects
+# CLD shows which groups are significantly different: groups sharing a letter are NOT significantly different
+
+cld_annotations <- data.frame()
+
+# Loop generically over `significant_genes` (derived programmatically in the
+# "Create ANOVA Models" section above) rather than a hand-picked gene list, since
+# that list changes whenever the normalizing gene changes.
+for (gene in significant_genes) {
+  emm_var <- emm_var_names[[gene]]
+  if (exists(emm_var)) {
+    cld_gene <- cld(get(emm_var), Letters = letters, alpha = 0.05)
+    cld_gene_df <- as.data.frame(cld_gene)
+    cld_gene_df$Target <- gene
+    cld_gene_df$label <- trimws(cld_gene_df$.group)
+    cld_gene_df <- cld_gene_df[, c("Target", "polyIC", "stress_type", "label")]
+    cld_annotations <- rbind(cld_annotations, cld_gene_df)
+  }
+}
+
+# Calculate y positions for annotations (above max values)
+if(nrow(cld_annotations) > 0) {
+  y_positions <- delta_Cq_df %>%
+    group_by(Target, stress_type, polyIC) %>%
+    summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
+  # Calculate data range for each gene to use proportional offset
+  y_range_per_gene <- delta_Cq_df %>%
+    group_by(Target) %>%
+    summarise(y_range = max(delta_Cq, na.rm = TRUE) - min(delta_Cq, na.rm = TRUE), .groups = "drop")
+  
+  cld_annotations <- cld_annotations %>%
+    left_join(y_positions, by = c("Target", "stress_type", "polyIC")) %>%
+    left_join(y_range_per_gene, by = "Target") %>%
+    mutate(y_pos = max_y + y_range * 0.08)  # 8% of data range above max
+}
+
+# Create plot
+p <- delta_Cq_df %>%
+  ggplot(aes(x = stress_type, y = delta_Cq, fill = polyIC)) +
+  geom_boxplot(position = position_dodge(0.8), alpha = 0.7, outlier.shape = NA) +
+  geom_point(position = position_dodge(0.8), alpha = 0.5, size = 1) +
+  facet_wrap(~Target, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +  # Extra space at top for annotations
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  theme_bw() +
+  labs(
+    title = "Delta Cq by Treatment Group with ANOVA Significance (All Groups)",
+    x = "Stress Type",
+    y = "Delta Cq",
+    fill = "PolyIC Treatment"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+# Add CLD annotations if any exist
+if(nrow(cld_annotations) > 0) {
+  p <- p + 
+    geom_text(data = cld_annotations, 
+              aes(x = stress_type, y = y_pos, label = label, group = polyIC),
+              position = position_dodge(0.8), size = 4, vjust = 0, 
+              color = "darkorange", fontface = "bold") +
+    labs(subtitle = "Letters show statistical groupings (p ≤ 0.05). Groups sharing a letter are NOT significantly different from each other",
+         caption = paste0("Compact Letter Display shown for: ", paste(significant_genes, collapse = ", "), ". See individual ANOVA sections for detailed p-values."))
+}
+
+print(p)
+```
+
+Repeat the same visualization restricted to Control and Temperature stress types only (excluding Mechanical stress), to focus on the Poly(I:C)-only comparisons.
+
+```{r anova-summary-plots-subset}
+#| label: anova-summary-plots-subset
+#| fig.width: 12
+#| fig.height: 8
+# Filter out Mechanical treatment
+plot_df <- delta_Cq_df %>%
+  filter(stress_type != "Mechanical")
+
+# Letters come from the all-stressor CLD (Tukey across all six PolyIC x stress-type
+# groups). Their y positions are recomputed from the plotted (Mechanical-excluded)
+# data: the all-stressor offsets scale with each gene's full range, which can exceed
+# this subset's free y-axis and push the letters out of the panel.
+subset_range <- plot_df %>%
+  group_by(Target) %>%
+  summarise(y_range = diff(range(delta_Cq, na.rm = TRUE)), .groups = "drop")
+subset_max <- plot_df %>%
+  group_by(Target, stress_type, polyIC) %>%
+  summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+cld_plot <- cld_annotations %>%
+  filter(stress_type != "Mechanical") %>%
+  dplyr::select(Target, polyIC, stress_type, label) %>%
+  left_join(subset_max,   by = c("Target", "stress_type", "polyIC")) %>%
+  left_join(subset_range, by = "Target") %>%
+  mutate(y_pos = max_y + y_range * 0.06)
+
+dodge <- position_dodge(0.8)
+
+# Create plot: 4 x 2 grid so seven panels get usable height
+p <- plot_df %>%
+  ggplot(aes(x = stress_type, y = delta_Cq, fill = polyIC)) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  geom_boxplot(position = dodge, alpha = 0.7, outlier.shape = NA) +
+  geom_point(position = dodge, alpha = 0.5, size = 1.2) +
+  facet_wrap(~Target, scales = "free_y", ncol = 4) +
+  scale_fill_manual(values = c("No_PolyIC" = "darkgray",
+                               "PolyIC" = "salmon")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.22))) +  # headroom for letters
+  theme_bw(base_size = 13) +
+  labs(
+    title = "Delta Cq by treatment group (Mechanical stress excluded)",
+    x = "Stress Type",
+    y = "Delta Cq",
+    fill = "PolyIC Treatment"
+  ) +
+  theme(
+    legend.position = "bottom",
+    plot.caption = element_text(hjust = 0)
+  )
+
+# Add CLD annotations
+if(nrow(cld_plot) > 0) {
+
+  p <- p +
+    geom_text(
+      data = cld_plot,
+      aes(x = stress_type, y = y_pos, label = label, group = polyIC),
+      position = dodge,
+      size = 4.5,
+      vjust = 0,
+      color = "darkorange",
+      fontface = "bold",
+      inherit.aes = FALSE
+    ) +
+    labs(
+      subtitle = "Letters: Tukey-adjusted groupings (p ≤ 0.05); groups sharing a letter are NOT significantly different",
+      caption = paste0("Letters are from the all-stressor ANOVAs (Tukey comparisons across Control, Temperature and Mechanical groups).\n",
+                       "Shown for genes with >=1 significant ANOVA term: ", paste(significant_genes, collapse = ", "), ".\n",
+                       "For letters from the temperature-only ANOVAs, see the per-gene plots in the Temperature-Only Analysis section.")
+    )
+}
+
+print(p)
+```
+
+Check sample size. 
+```{r}
+sample_sizes <- delta_Cq_df %>%
+  filter(!stress_type=="Mechanical")%>%
+  group_by(Target, stress_type, polyIC) %>%
+  summarise(
+    n = sum(!is.na(delta_Cq)),
+    .groups = "drop"
+  );sample_sizes
+```
+
+# Delta Delta Cq and Fold Change Analysis
+
+## Calculate delta delta Cq for each comparison
+
+### Comparison 1: Stressors vs Control (No PolyIC)
+
+```{r delta-delta-cq-no-polyIC}
+#| hold: true
+#| results: hold
+#| label: delta-delta-cq-no-polyIC
+
+# Calculate delta delta Cq for Temperature vs Control (No PolyIC)
+delta_delta_temp_no_polyIC <- no_polyIC_data %>%
+  group_by(Target) %>%
+  summarise(
+    mean_control = mean(delta_Cq[stress_type == "Control"], na.rm = TRUE),
+    mean_temp = mean(delta_Cq[stress_type == "Temperature"], na.rm = TRUE),
+    delta_delta_Cq = mean_temp - mean_control,
+    fold_change = 2^(-delta_delta_Cq),
+    .groups = 'drop'
+  )
+
+print("Temperature vs Control (No PolyIC):")
+print(delta_delta_temp_no_polyIC)
+
+# Calculate delta delta Cq for Mechanical vs Control (No PolyIC)
+delta_delta_mech_no_polyIC <- no_polyIC_data %>%
+  group_by(Target) %>%
+  summarise(
+    mean_control = mean(delta_Cq[stress_type == "Control"], na.rm = TRUE),
+    mean_mech = mean(delta_Cq[stress_type == "Mechanical"], na.rm = TRUE),
+    delta_delta_Cq = mean_mech - mean_control,
+    fold_change = 2^(-delta_delta_Cq),
+    .groups = 'drop'
+  )
+
+print("Mechanical vs Control (No PolyIC):")
+print(delta_delta_mech_no_polyIC)
+```
+
+### Comparison 2: PolyIC Control vs Basic Control
+
+```{r delta-delta-cq-polyIC-control}
+#| hold: true
+#| results: hold
+#| label: delta-delta-cq-polyIC-control
+
+delta_delta_polyIC_control <- control_data %>%
+  group_by(Target) %>%
+  summarise(
+    mean_no_polyIC = mean(delta_Cq[polyIC == "No_PolyIC"], na.rm = TRUE),
+    mean_polyIC = mean(delta_Cq[polyIC == "PolyIC"], na.rm = TRUE),
+    delta_delta_Cq = mean_polyIC - mean_no_polyIC,
+    fold_change = 2^(-delta_delta_Cq),
+    .groups = 'drop'
+  )
+
+print("PolyIC Control vs Basic Control:")
+print(delta_delta_polyIC_control)
+```
+
+### Comparison 3: PolyIC Stressors vs PolyIC Control
+
+```{r delta-delta-cq-polyIC-stress}
+#| hold: true
+#| results: hold
+#| label: delta-delta-cq-polyIC-stress
+
+# Calculate delta delta Cq for Temperature vs Control (PolyIC)
+delta_delta_temp_polyIC <- polyIC_data %>%
+  group_by(Target) %>%
+  summarise(
+    mean_control = mean(delta_Cq[stress_type == "Control"], na.rm = TRUE),
+    mean_temp = mean(delta_Cq[stress_type == "Temperature"], na.rm = TRUE),
+    delta_delta_Cq = mean_temp - mean_control,
+    fold_change = 2^(-delta_delta_Cq),
+    .groups = 'drop'
+  )
+
+print("Temperature vs Control (PolyIC):")
+print(delta_delta_temp_polyIC)
+
+# Calculate delta delta Cq for Mechanical vs Control (PolyIC)
+delta_delta_mech_polyIC <- polyIC_data %>%
+  group_by(Target) %>%
+  summarise(
+    mean_control = mean(delta_Cq[stress_type == "Control"], na.rm = TRUE),
+    mean_mech = mean(delta_Cq[stress_type == "Mechanical"], na.rm = TRUE),
+    delta_delta_Cq = mean_mech - mean_control,
+    fold_change = 2^(-delta_delta_Cq),
+    .groups = 'drop'
+  )
+
+print("Mechanical vs Control (PolyIC):")
+print(delta_delta_mech_polyIC)
+```
+
+## Fold Change Bar Plots
+
+Bars show log2 fold change (log2 FC = −ΔΔCq) relative to the stated control group, so increases and decreases of the same magnitude are the same height above or below 0. The right-hand axis gives the equivalent fold change (e.g. 2× = log2 FC of 1; 1/2× = −1).
+
+### No PolyIC: Stressors vs Control
+
+```{r barplot-fold-change-no-polyIC}
+#| hold: true
+#| label: barplot-fold-change-no-polyIC
+#| fig.width: 10
+#| fig.height: 6
+
+# Combine temperature and mechanical comparisons
+fold_change_no_polyIC <- bind_rows(
+  delta_delta_temp_no_polyIC %>% mutate(comparison = "Temperature vs Control"),
+  delta_delta_mech_no_polyIC %>% mutate(comparison = "Mechanical vs Control")
+)
+
+# Fold-change bar plot on a log2 scale: bars show log2(FC) = -delta_delta_Cq, so
+# up- and down-regulation are symmetric around 0 and a large change (e.g. HSP70
+# under temperature stress) no longer flattens every other gene, as it does on a
+# linear fold-change axis. The right-hand axis labels the same gridlines in
+# fold-change units.
+plot_log2fc <- function(df, fill_var, title, fill_lab = NULL, show_fill_legend = TRUE) {
+  df <- df %>% mutate(log2_fc = -delta_delta_Cq)
+  brk <- seq(floor(min(c(df$log2_fc, 0), na.rm = TRUE)),
+             ceiling(max(c(df$log2_fc, 0), na.rm = TRUE)), by = 1)
+  fc_lab <- ifelse(brk >= 0, paste0(2^brk, "×"), paste0("1/", 2^(-brk), "×"))
+
+  # Fold-change value printed at the end of each bar so small changes stay readable
+  df <- df %>% mutate(fc_txt = sprintf("%.2f×", 2^log2_fc),
+                      lab_vjust = ifelse(log2_fc >= 0, -0.4, 1.4))
+
+  ggplot(df, aes(x = Target, y = log2_fc, fill = .data[[fill_var]])) +
+    geom_col(position = position_dodge(0.9), width = 0.85) +
+    geom_text(aes(label = fc_txt, vjust = lab_vjust, group = .data[[fill_var]]),
+              position = position_dodge(0.9), size = 3) +
+    geom_hline(aes(yintercept = 0, linetype = "No change (log2 FC = 0)"), color = "black") +
+    scale_linetype_manual(name = "", values = c("No change (log2 FC = 0)" = "dashed")) +
+    scale_y_continuous(breaks = brk,
+                       expand = expansion(mult = 0.10),  # room for value labels
+                       sec.axis = sec_axis(~ ., breaks = brk, labels = fc_lab,
+                                           name = "Fold change")) +
+    theme_bw() +
+    labs(title = title, x = "Target Gene", y = "log2 fold change (−ΔΔCq)", fill = fill_lab) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid.minor = element_blank()) +
+    if (!show_fill_legend) guides(fill = "none") else NULL
+}
+
+plot_log2fc(fold_change_no_polyIC, "comparison",
+            "Fold Change: Stressors vs Control (No PolyIC)", fill_lab = "Comparison")
+```
+
+### PolyIC Control vs Basic Control
+
+```{r barplot-fold-change-polyIC-control}
+#| hold: true
+#| label: barplot-fold-change-polyIC-control
+#| fig.width: 10
+#| fig.height: 6
+
+# Gene is already on the x-axis, so the fill legend would be redundant
+plot_log2fc(delta_delta_polyIC_control, "Target",
+            "Fold Change: PolyIC Control vs Basic Control", show_fill_legend = FALSE)
+```
+
+### PolyIC: Stressors vs Control
+
+```{r barplot-fold-change-polyIC-stress}
+#| hold: true
+#| label: barplot-fold-change-polyIC-stress
+#| fig.width: 10
+#| fig.height: 6
+
+# Combine temperature and mechanical comparisons for PolyIC
+fold_change_polyIC <- bind_rows(
+  delta_delta_temp_polyIC %>% mutate(comparison = "Temperature vs Control"),
+  delta_delta_mech_polyIC %>% mutate(comparison = "Mechanical vs Control")
+)
+
+plot_log2fc(fold_change_polyIC, "comparison",
+            "Fold Change: Stressors vs Control (PolyIC Treatment)", fill_lab = "Comparison")
+```
+
+# Temperature-Only Analysis: PolyIC vs No_PolyIC (Mechanical Excluded)
+
+## Data Subset and Sample Sizes
+
+All analyses in this section use only the Control and Temperature stress groups (Mechanical excluded).
+
+```{r}
+data <- delta_Cq_df %>%
+  filter(!stress_type=="Mechanical")
+```
+
+```{r}
+sample_sizes <- data %>%
+  group_by(Target, stress_type, polyIC) %>%
+  summarise(
+    n = sum(!is.na(delta_Cq)),
+    .groups = "drop"
+  );sample_sizes
+```
+
+## Per-gene Two-way ANOVAs (PolyIC × Stress Type)
+
+Each gene's first plot (colored by PolyIC) is annotated with a Compact Letter Display (CLD) from that gene's two-way ANOVA on the temperature-only data. The method matches the all-stressor Summary Plots: letters are shown only when at least one ANOVA term (polyIC, stress_type or their interaction) has p < 0.05, and they come from Tukey-adjusted pairwise comparisons of the four PolyIC × stress-type group means. Groups that share a letter are **not** significantly different. The second plot (colored by biological replicate) is a diagnostic and is not annotated.
+
+Each gene ends with an interpretation generated from its results: assumption checks, the two-way ANOVA terms, and the four Tukey-adjusted comparisons that match the plot's CLD letters (PolyIC vs No_PolyIC at each temperature, and Temperature vs Control with and without PolyIC).
+
+```{r temp-only-cld-helper}
+#| label: temp-only-cld-helper
+# Boxplot of delta Cq by stress type x PolyIC for one gene from the temperature-only
+# `data` subset, annotated with CLD letters from the gene's two-way ANOVA.
+plot_temp_cld <- function(gene) {
+  gene_df <- data %>% filter(Target == gene)
+  fit     <- aov(delta_Cq ~ polyIC * stress_type, data = gene_df)
+  anova_p <- summary(fit)[[1]][["Pr(>F)"]][1:3]
+  dodge   <- position_dodge(0.75)
+
+  p <- ggplot(gene_df, aes(x = stress_type, colour = polyIC, y = delta_Cq)) +
+    geom_boxplot(outlier.shape = NA, position = dodge) +
+    geom_point(position = dodge) +
+    theme_classic() +
+    labs(title = gene)
+
+  if (any(anova_p < 0.05, na.rm = TRUE)) {
+    y_range <- diff(range(gene_df$delta_Cq, na.rm = TRUE))
+    group_max <- gene_df %>%
+      group_by(polyIC, stress_type) %>%
+      summarise(max_y = max(delta_Cq, na.rm = TRUE), .groups = "drop")
+    cld_df <- as.data.frame(cld(emmeans(fit, ~ polyIC * stress_type),
+                                Letters = letters, alpha = 0.05)) %>%
+      mutate(label = trimws(.group)) %>%
+      left_join(group_max, by = c("polyIC", "stress_type")) %>%
+      mutate(y_pos = max_y + y_range * 0.08)   # 8% of data range above group max
+
+    p <- p +
+      geom_text(data = cld_df,
+                aes(x = stress_type, y = y_pos, label = label, group = polyIC),
+                position = dodge, colour = "black", size = 4, vjust = 0,
+                inherit.aes = FALSE) +
+      scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+      labs(subtitle = "Letters: Tukey-adjusted groupings (alpha = 0.05)\nGroups sharing a letter are not significantly different")
+  } else {
+    p <- p + labs(subtitle = "No significant ANOVA terms (all p >= 0.05)\nLetters not shown")
+  }
+  p
+}
+
+# Results-driven interpretation text for one gene's temperature-only two-way ANOVA.
+# Generated from the same model, assumption tests and Tukey family used for the
+# plot's CLD letters, so it updates automatically when the data or the
+# normalizing gene change (replaces hand-written verdicts that went stale).
+interpret_temp_gene <- function(gene, alpha = 0.05) {
+  p_txt   <- function(p) ifelse(p < 1e-4, "p < 0.0001",
+                                paste0("p = ", formatC(p, format = "f", digits = 4)))
+  sig_txt <- function(p) ifelse(p < alpha, "**significant**", "not significant")
+
+  gene_df <- data %>%
+    filter(Target == gene) %>%
+    mutate(polyIC = factor(polyIC), stress_type = factor(stress_type))
+  fit <- aov(delta_Cq ~ polyIC * stress_type, data = gene_df)
+  tab <- summary(fit)[[1]]
+  rownames(tab) <- trimws(rownames(tab))
+  p_term <- setNames(tab[c("polyIC", "stress_type", "polyIC:stress_type"), "Pr(>F)"],
+                     c("polyIC", "stress_type", "interaction"))
+
+  # Same assumption tests as the Robustness section's assumption table
+  shapiro_p <- shapiro.test(residuals(fit))$p.value
+  levene_p  <- leveneTest(delta_Cq ~ polyIC * stress_type, data = gene_df)[1, "Pr(>F)"]
+  normal_ok <- shapiro_p >= alpha
+  var_ok    <- levene_p  >= alpha
+
+  # Headline
+  if (all(p_term >= alpha)) {
+    head_txt <- "No significant effect of PolyIC, temperature, or their interaction."
+  } else if (p_term[["interaction"]] < alpha) {
+    head_txt <- paste("Significant PolyIC × temperature interaction: the PolyIC effect differs",
+                      "between Control and Temperature, so interpret the group comparisons",
+                      "below rather than the main effects alone.")
+  } else if (p_term[["polyIC"]] < alpha && p_term[["stress_type"]] < alpha) {
+    head_txt <- paste("Significant main effects of PolyIC and temperature, with no significant",
+                      "interaction (the two effects are additive).")
+  } else if (p_term[["polyIC"]] < alpha) {
+    head_txt <- paste("Significant main effect of PolyIC, with no significant interaction",
+                      "(the PolyIC effect is similar at both temperatures).")
+  } else {
+    head_txt <- paste("Significant main effect of temperature, with no significant interaction",
+                      "(the temperature effect is similar with and without PolyIC).")
+  }
+  out <- c(paste0("**Summary (", gene, "):** ", head_txt), "")
+
+  # Assumptions
+  out <- c(out, "**Assumptions:**", "",
+           paste0("- Residual normality (Shapiro–Wilk): ", ifelse(normal_ok, "met", "**not met**"),
+                  " (", p_txt(shapiro_p), ")"),
+           paste0("- Equal variances (Levene): ", ifelse(var_ok, "met", "**not met**"),
+                  " (", p_txt(levene_p), ")"))
+  if (!(normal_ok && var_ok)) {
+    out <- c(out, paste0("- Because ", ifelse(!normal_ok && !var_ok, "neither assumption is met",
+                                              "one assumption is not met"),
+                         ", check *Robustness of Two-way ANOVA Results* below to see whether these ",
+                         "conclusions hold under ",
+                         ifelse(!var_ok, "the HC3 (unequal-variance) test", "the permutation test"), "."))
+  }
+  out <- c(out, "")
+
+  # ANOVA terms (Type I, as printed by summary(model) above)
+  out <- c(out, "**Two-way ANOVA** (from `summary(model)` above):", "",
+           paste0("- PolyIC: ", sig_txt(p_term[["polyIC"]]), " (", p_txt(p_term[["polyIC"]]), ")"),
+           paste0("- Stress type (Control vs Temperature): ", sig_txt(p_term[["stress_type"]]),
+                  " (", p_txt(p_term[["stress_type"]]), ")"),
+           paste0("- PolyIC × stress type: ", sig_txt(p_term[["interaction"]]),
+                  " (", p_txt(p_term[["interaction"]]), ")"), "")
+
+  # Group comparisons from the same Tukey family as the CLD letters on the plot
+  pw <- as.data.frame(pairs(emmeans(fit, ~ polyIC * stress_type), adjust = "tukey"))
+  pw$contrast <- gsub("[()]", "", as.character(pw$contrast))
+  comps <- list(
+    list(a = "PolyIC Control",        b = "No_PolyIC Control",     lab = "At Control",       an = "PolyIC",      bn = "No_PolyIC"),
+    list(a = "PolyIC Temperature",    b = "No_PolyIC Temperature", lab = "At Temperature",   an = "PolyIC",      bn = "No_PolyIC"),
+    list(a = "No_PolyIC Temperature", b = "No_PolyIC Control",     lab = "Without PolyIC",   an = "Temperature", bn = "Control"),
+    list(a = "PolyIC Temperature",    b = "PolyIC Control",        lab = "With PolyIC",      an = "Temperature", bn = "Control")
+  )
+  out <- c(out, paste0("**Group comparisons** (Tukey-adjusted, same tests as the CLD letters; ",
+                       "Δ = difference in mean delta Cq; negative Δ = higher expression relative to ",
+                       normalizing_gene, "):"), "")
+  for (cmp in comps) {
+    r <- pw[pw$contrast == paste(cmp$a, "-", cmp$b), ]; sgn <- 1
+    if (nrow(r) == 0) { r <- pw[pw$contrast == paste(cmp$b, "-", cmp$a), ]; sgn <- -1 }
+    stopifnot(nrow(r) == 1)
+    d <- sgn * r$estimate
+    p <- r$p.value
+    verdict <- if (p >= alpha) "no significant difference" else
+      paste0("**", ifelse(d < 0, "higher", "lower"), " expression in ", cmp$an, "**")
+    out <- c(out, paste0("- ", cmp$lab, ", ", cmp$an, " vs ", cmp$bn, ": Δ = ", sprintf("%+.2f", d),
+                         ", ", p_txt(p), " (", verdict, ")"))
+  }
+  # A significant ANOVA term with no significant Tukey pair (all CLD letters shared)
+  if (any(p_term < alpha) && all(pw$p.value >= alpha)) {
+    out <- c(out, "", paste("*Note:* although at least one ANOVA term is significant, none of the",
+                            "six Tukey-adjusted pairwise comparisons is, so the effect is small",
+                            "relative to within-group variation."))
+  }
+  paste(c(out, ""), collapse = "\n")
+}
+```
+
+### ATP Synthase
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+
+
+data%>%
+  filter(Target=="ATP.Synthase")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="ATP.Synthase")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+Does not pass homogeneity of variance 
+
+### Citrate Synthase
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+
+
+data%>%
+  filter(Target=="Citrate.Synthase")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="Citrate.Synthase")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+Does not pass homogeneity of variance 
+
+### DNMT1
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+
+
+data%>%
+  filter(Target=="DNMT1")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="DNMT1")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+emm<-emmeans(model, ~polyIC | stress_type)
+pairs(emm)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+### HSP70
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+
+
+data%>%
+  filter(Target=="HSP70")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="HSP70")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+emm<-emmeans(model, ~ stress_type)
+pairs(emm)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+### HSP90
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+
+
+data%>%
+  filter(Target=="HSP90")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="HSP90")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+emm<-emmeans(model, ~ polyIC)
+pairs(emm)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+### GAPDH
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+data%>%
+  filter(Target=="GAPDH")%>%
+  
+  ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="GAPDH")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+### VIPERIN
+
+Run ANOVA analyses and check assumptions 
+
+Plot raw data 
+
+```{r}
+data%>%
+  filter(Target=="VIPERIN")%>%
+  
+    ggplot(aes(x=stress_type, colour=bio_replicate, y=delta_Cq))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(position=position_dodge(0.75))+
+  theme_classic()
+```
+
+```{r}
+model<-data%>%
+  filter(Target=="VIPERIN")%>%
+  
+  aov(delta_Cq~polyIC*stress_type, data=.)
+
+summary(model)
+
+qqPlot(model$residuals)
+plot(model, 1)
+plot(model, 3)
+plot(model, 4)
+```
+
+## Robustness of Two-way ANOVA Results
+
+The per-gene ANOVAs above use `aov()`, which has two limitations for this data subset:
+
+1. **Sequential (Type I) sums of squares.** Group sizes here are slightly unequal (see *Data Subset and Sample Sizes*), so with `aov()` the polyIC and stress_type tests depend on the order in which the terms are entered.
+2. **Normality and equal-variance assumptions.** Several genes have non-normal residuals and/or unequal group variances (see the assumption checks in each gene's section above).
+
+To check whether the conclusions depend on these issues, every gene is re-tested on the full temperature-only data (no samples discarded) with three methods:
+
+- **Type II ANOVA** (`car::Anova(..., type = 2)`): each main effect is tested after adjusting for the other, so results do not depend on term order.
+- **HC3 Type II ANOVA** (`white.adjust = "hc3"`): the same tests with heteroscedasticity-consistent standard errors, which are robust to unequal group variances.
+- **Permutation Type II ANOVA** (Freedman–Lane, 5,000 permutations): for each term, residuals from the model without that term are randomly shuffled and the Type II F-statistic is recomputed, giving a p-value that does not assume normally distributed residuals.
+
+The two robust methods target different assumptions. HC3 corrects for unequal variances but still relies on approximate normality, while the permutation test drops the normality assumption but treats residuals as interchangeable, which effectively assumes similar variances across groups. So for genes with unequal variances (Levene p < 0.05), the HC3 result is the more reliable of the two.
+
+A result is treated as robust when all three methods agree on whether p < 0.05. When the polyIC × stress_type interaction is significant, the main effects should be interpreted through the group comparisons (CLD letters) in the per-gene plots above rather than on their own.
+
+### Assumption Checks and Test Results
+
+```{r robust-anova}
+#| label: robust-anova
+set.seed(42)
+n_perm <- 5000
+alpha  <- 0.05
+
+# Test every gene in the temperature-only subset (not a pre-selected subset).
+robust_genes <- intersect(all_genes_of_interest, unique(data$Target))
+
+term_names <- c("polyIC", "stress_type", "polyIC:stress_type")
+
+# Type II F-statistics computed from residual sums of squares (RSS), so they can be
+# evaluated for thousands of permuted responses at once: qr.resid() accepts a matrix
+# whose columns are separate response vectors.
+#   polyIC:      RSS(~ stress_type)          - RSS(~ polyIC + stress_type)
+#   stress_type: RSS(~ polyIC)               - RSS(~ polyIC + stress_type)
+#   interaction: RSS(~ polyIC + stress_type) - RSS(~ polyIC * stress_type)
+# each divided by its df and by the full-model error mean square.
+type2_F <- function(Y, qrs, df_err) {
+  rss <- lapply(qrs, function(q) colSums(qr.resid(q, Y)^2))
+  ms_err <- rss$full / df_err
+  cbind(
+    polyIC               = ((rss$stress   - rss$additive) / (qrs$additive$rank - qrs$stress$rank)) / ms_err,
+    stress_type          = ((rss$polyIC   - rss$additive) / (qrs$additive$rank - qrs$polyIC$rank)) / ms_err,
+    `polyIC:stress_type` = ((rss$additive - rss$full)     / (qrs$full$rank - qrs$additive$rank))  / ms_err
+  )
+}
+
+# Reduced model used for each term's Freedman-Lane permutation (the Type II
+# comparison model that omits the term being tested).
+reduced_for <- c(polyIC = "stress", stress_type = "polyIC", `polyIC:stress_type` = "additive")
+
+robust_results  <- list()
+assumption_rows <- list()
+
+for (gene in robust_genes) {
+  gene_df <- data %>%
+    filter(Target == gene, !is.na(delta_Cq)) %>%
+    mutate(polyIC = factor(polyIC), stress_type = factor(stress_type))
+  y <- gene_df$delta_Cq
+  n <- length(y)
+
+  fit <- lm(delta_Cq ~ polyIC * stress_type, data = gene_df)
+
+  # Assumption checks on the full model
+  assumption_rows[[gene]] <- data.frame(
+    Target     = gene,
+    n          = n,
+    shapiro_p  = shapiro.test(residuals(fit))$p.value,
+    levene_p   = leveneTest(delta_Cq ~ polyIC * stress_type, data = gene_df)[1, "Pr(>F)"]
+  )
+
+  # 1) Type II ANOVA and 2) HC3 Type II ANOVA
+  a2   <- Anova(fit, type = 2)
+  ahc3 <- Anova(fit, type = 2, white.adjust = "hc3")
+
+  # 3) Permutation Type II ANOVA (Freedman-Lane)
+  qrs <- list(
+    stress   = qr(model.matrix(~ stress_type,          data = gene_df)),
+    polyIC   = qr(model.matrix(~ polyIC,               data = gene_df)),
+    additive = qr(model.matrix(~ polyIC + stress_type, data = gene_df)),
+    full     = qr(model.matrix(~ polyIC * stress_type, data = gene_df))
+  )
+  df_err <- n - qrs$full$rank
+  F_obs  <- type2_F(matrix(y), qrs, df_err)[1, ]
+
+  # Sanity check: the fast F-statistics must match car::Anova's Type II F-values
+  stopifnot(isTRUE(all.equal(unname(F_obs), unname(a2[term_names, "F value"]), tolerance = 1e-8)))
+
+  perm_index <- replicate(n_perm, sample.int(n))   # n x n_perm matrix of shuffles
+  perm_p <- sapply(term_names, function(term) {
+    q_red   <- qrs[[reduced_for[[term]]]]
+    fit_red <- qr.fitted(q_red, y)
+    res_red <- qr.resid(q_red, y)
+    Y_star  <- fit_red + matrix(res_red[perm_index], nrow = n)
+    F_star  <- type2_F(Y_star, qrs, df_err)[, term]
+    (1 + sum(F_star >= F_obs[[term]] * (1 - 1e-10))) / (n_perm + 1)
+  })
+
+  robust_results[[gene]] <- data.frame(
+    Target         = gene,
+    term           = term_names,
+    p_type2        = a2[term_names, "Pr(>F)"],
+    p_hc3          = ahc3[term_names, "Pr(>F)"],
+    p_permutation  = unname(perm_p)
+  )
+}
+
+robust_results  <- bind_rows(robust_results) %>%
+  mutate(
+    n_sig  = (p_type2 < alpha) + (p_hc3 < alpha) + (p_permutation < alpha),
+    agree  = n_sig %in% c(0, 3),
+    call   = case_when(n_sig == 3 ~ "Significant (all methods)",
+                       n_sig == 0 ~ "Not significant (all methods)",
+                       TRUE       ~ "Methods disagree")
+  )
+assumption_results <- bind_rows(assumption_rows) %>%
+  mutate(normal_residuals = shapiro_p >= alpha,
+         equal_variances  = levene_p  >= alpha)
+
+# p-value formatting: permutation p-values cannot go below 1/(n_perm + 1)
+p_floor <- 1 / (n_perm + 1)
+fmt_p <- function(p, perm = FALSE) {
+  ifelse(perm & p <= p_floor + 1e-12, paste0("≤ ", formatC(p_floor, format = "f", digits = 4)),
+         ifelse(p < 1e-4, "< 0.0001", formatC(p, format = "f", digits = 4)))
+}
+
+assumption_results %>%
+  transmute(Gene = Target, n,
+            `Shapiro-Wilk p (residuals)` = fmt_p(shapiro_p),
+            `Levene p` = fmt_p(levene_p),
+            `Normal residuals` = ifelse(normal_residuals, "Yes", "No"),
+            `Equal variances`  = ifelse(equal_variances,  "Yes", "No")) %>%
+  knitr::kable(caption = "Assumption checks for each gene's two-way ANOVA (temperature-only data). Shapiro-Wilk tests normality of residuals; Levene's test (median-centered) tests equality of group variances. p < 0.05 indicates the assumption is violated.")
+
+robust_results %>%
+  transmute(Gene = Target, Term = term,
+            `Type II p` = fmt_p(p_type2),
+            `HC3 Type II p` = fmt_p(p_hc3),
+            `Permutation p` = fmt_p(p_permutation, perm = TRUE),
+            Conclusion = call) %>%
+  knitr::kable(caption = paste0("Two-way ANOVA p-values by method (temperature-only data). Permutation p-values are from ",
+                                format(n_perm, big.mark = ","), " Freedman-Lane permutations; the smallest attainable value is ",
+                                formatC(p_floor, format = "f", digits = 4), "."))
+```
+
+### P-value Comparison Across Methods
+
+```{r robust-anova-pvalues}
+#| label: robust-anova-pvalues
+#| fig.width: 10
+#| fig.height: 6
+neglog_cap <- 6   # draw -log10(p) values above this at the cap so small p-values don't flatten the plot
+
+robust_long <- robust_results %>%
+  pivot_longer(c(p_type2, p_hc3, p_permutation), names_to = "method", values_to = "p") %>%
+  mutate(
+    method = factor(method, levels = c("p_type2", "p_hc3", "p_permutation"),
+                    labels = c("Type II", "HC3 Type II", "Permutation")),
+    term   = factor(term, levels = term_names,
+                    labels = c("PolyIC", "Stress type", "PolyIC ×\nstress type")),
+    neglog = -log10(p),
+    capped = neglog > neglog_cap,
+    neglog_plot = pmin(neglog, neglog_cap),
+    Target = factor(Target, levels = robust_genes)   # same gene order as the tables
+  )
+
+p_robust <- ggplot(robust_long, aes(x = term, y = neglog_plot, colour = method, shape = capped)) +
+  geom_hline(yintercept = -log10(alpha), linetype = "dashed", colour = "grey40") +
+  geom_point(position = position_dodge(width = 0.6), size = 2.5) +
+  facet_wrap(~ Target, nrow = 2) +
+  scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
+                     labels = c(`FALSE` = "Exact", `TRUE` = paste0("> ", neglog_cap, " (capped)")),
+                     name = "-log10(p)") +
+  scale_colour_manual(values = c("Type II" = "grey30", "HC3 Type II" = "steelblue", "Permutation" = "darkorange"),
+                      name = "Method") +
+  scale_y_continuous(limits = c(0, neglog_cap), expand = expansion(mult = c(0.04, 0.04))) +
+  labs(title = "Two-way ANOVA p-values by method (temperature-only data)",
+       subtitle = paste0("Dashed line: p = ", alpha, ". Points above the line are significant. ",
+                         "Permutation p-values cannot exceed -log10(", formatC(p_floor, format = "f", digits = 4), ") = ",
+                         round(-log10(p_floor), 2), "."),
+       x = NULL, y = "-log10(p)") +
+  theme_bw() +
+  theme(legend.position = "right")
+
+print(p_robust)
+```
+
+### Interpretation
+
+```{r robust-anova-interpretation}
+#| label: robust-anova-interpretation
+#| results: asis
+fmt_list <- function(x) if (length(x) == 0) "none" else paste(x, collapse = ", ")
+# "p = 0.0123", "p < 0.0001", or (permutation floor) "p ≤ 0.0002"
+p_str <- function(p, perm = FALSE) {
+  f <- fmt_p(p, perm)
+  ifelse(grepl("^[<≤]", f), paste("p", f), paste("p =", f))
+}
+
+non_normal  <- assumption_results$Target[!assumption_results$normal_residuals]
+unequal_var <- assumption_results$Target[!assumption_results$equal_variances]
+disagree    <- robust_results %>% filter(!agree)
+n_tests     <- nrow(robust_results)
+
+cat("- **Genes with non-normal residuals (Shapiro-Wilk p < 0.05):** ", fmt_list(non_normal), "\n", sep = "")
+cat("- **Genes with unequal group variances (Levene p < 0.05):** ", fmt_list(unequal_var), "\n", sep = "")
+cat("- **Agreement:** the three methods agree on significance for ", sum(robust_results$agree), " of ",
+    n_tests, " gene × term tests.\n", sep = "")
+
+if (nrow(disagree) > 0) {
+  cat("- **Tests where methods disagree** (treat as not robust):\n")
+  for (i in seq_len(nrow(disagree))) {
+    r <- disagree[i, ]
+    note <- if (r$Target %in% unequal_var) {
+      paste0(" -- ", r$Target, " has unequal group variances, so the HC3 result (",
+             ifelse(r$p_hc3 < alpha, "significant", "not significant"), ") is the more reliable one")
+    } else ""
+    cat("    - ", r$Target, ", ", r$term, ": Type II ", p_str(r$p_type2),
+        "; HC3 ", p_str(r$p_hc3), "; permutation ", p_str(r$p_permutation, perm = TRUE), note, "\n", sep = "")
+  }
+} else {
+  cat("- **Tests where methods disagree:** none.\n")
+}
+
+robust_sig <- robust_results %>% filter(n_sig == 3)
+cat("\n**Robust significant effects (all three methods p < ", alpha, "):**\n\n", sep = "")
+if (nrow(robust_sig) > 0) {
+  for (g in unique(robust_sig$Target)) {
+    cat("- ", g, ": ", paste(robust_sig$term[robust_sig$Target == g], collapse = ", "), "\n", sep = "")
+  }
+} else {
+  cat("- none\n")
+}
+```
+
+## Fold Change Figures: PolyIC vs No_PolyIC at Control and High Temperature
+
+Visualize per-sample delta-delta Cq and fold change relative to the No_PolyIC Control group mean. The genes shown are those with at least one significant term (polyIC, stress_type or polyIC × stress_type, p < 0.05) in the *Create ANOVA Models* ANOVAs, which include all three stress types (Control, Temperature **and Mechanical**): `r paste(significant_genes, collapse = ", ")`. These figures show only the Control and Temperature groups, so a gene can appear here because of a Mechanical-stress effect even if it shows no PolyIC or temperature difference in this subset; see the per-gene temperature-only ANOVAs above for which comparisons are significant here.
+
+Each point represents one biological replicate sample. The reference group (No_PolyIC_Control) anchors at delta-delta Cq = 0 / fold change = 1. Individual points are shown alongside group mean ± SE to convey both biological variability and the central tendency.
+
+```{r ddcq-per-sample-calculate}
+#| hold: true
+#| results: hold
+#| label: ddcq-per-sample-calculate
+
+# Reference: mean delta_Cq of No_PolyIC_Control for each gene
+ref_means <- data %>%
+  filter(polyIC == "No_PolyIC", stress_type == "Control") %>%
+  group_by(Target) %>%
+  summarise(ref_delta_Cq = mean(delta_Cq, na.rm = TRUE), .groups = "drop")
+
+# Per-sample delta-delta Cq and fold change
+ddCq_per_sample <- data %>%
+  left_join(ref_means, by = "Target") %>%
+  mutate(
+    delta_delta_Cq   = delta_Cq - ref_delta_Cq,
+    fold_change      = 2^(-delta_delta_Cq),
+    log2_fold_change = -delta_delta_Cq        # log2(FC) = -ddCq
+  )
+
+# Group summary (mean ± SE) for overlay
+ddCq_summary <- ddCq_per_sample %>%
+  group_by(Target, polyIC, stress_type) %>%
+  summarise(
+    mean_ddCq = mean(delta_delta_Cq,   na.rm = TRUE),
+    se_ddCq   = sd(delta_delta_Cq,     na.rm = TRUE) /
+                  sqrt(sum(!is.na(delta_delta_Cq))),
+    mean_log2fc = mean(log2_fold_change, na.rm = TRUE),
+    se_log2fc   = sd(log2_fold_change,   na.rm = TRUE) /
+                    sqrt(sum(!is.na(log2_fold_change))),
+    n = sum(!is.na(delta_delta_Cq)),
+    .groups = "drop"
+  )
+
+# Treatment label ordering for consistent x-axis
+ddCq_per_sample <- ddCq_per_sample %>%
+  mutate(
+    stress_type = factor(stress_type, levels = c("Control", "Temperature")),
+    polyIC      = factor(polyIC,      levels = c("No_PolyIC", "PolyIC"))
+  )
+
+ddCq_summary <- ddCq_summary %>%
+  mutate(
+    stress_type = factor(stress_type, levels = c("Control", "Temperature")),
+    polyIC      = factor(polyIC,      levels = c("No_PolyIC", "PolyIC"))
+  )
+
+cat("Per-sample delta-delta Cq calculated for", n_distinct(ddCq_per_sample$Sample),
+    "samples across", n_distinct(ddCq_per_sample$Target), "genes.\n")
+cat("Reference group: No_PolyIC_Control (delta-delta Cq = 0 / fold change = 1)\n")
+```
+
+### Delta-Delta Cq: Individual Replicates
+
+Delta-delta Cq values per sample, relative to the No_PolyIC_Control group mean. Negative values indicate lower Cq (higher expression) relative to the reference; positive values indicate higher Cq (lower expression). Points are individual biological replicates; diamonds show group mean ± SE.
+
+```{r plot-ddcq-individual}
+#| hold: true
+#| label: plot-ddcq-individual
+#| fig.width: 12
+#| fig.height: 7
+
+dodge_width <- 0.55
+
+ggplot() +
+  # Individual replicate points
+  geom_point(
+    data     = ddCq_per_sample,
+    aes(x    = stress_type,
+        y    = delta_delta_Cq,
+        color = polyIC,
+        shape = bio_replicate),
+    position = position_jitterdodge(jitter.width = 0.12,
+                                    dodge.width  = dodge_width),
+    size  = 2.2,
+    alpha = 0.75
+  ) +
+  # Mean ± SE error bars
+  geom_errorbar(
+    data     = ddCq_summary,
+    aes(x    = stress_type,
+        ymin = mean_ddCq - se_ddCq,
+        ymax = mean_ddCq + se_ddCq,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    width    = 0.18,
+    linewidth = 0.8
+  ) +
+  # Group mean as a diamond
+  geom_point(
+    data     = ddCq_summary,
+    aes(x    = stress_type,
+        y    = mean_ddCq,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    shape    = 18,   # filled diamond
+    size     = 4
+  ) +
+  # Reference line at 0 (= No_PolyIC_Control level)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.4) +
+  facet_wrap(~Target, scales = "free_y", nrow = 2) +
+  scale_color_manual(
+    values = c("No_PolyIC" = "darkgray", "PolyIC" = "salmon"),
+    labels = c("No_PolyIC" = "No PolyIC", "PolyIC" = "PolyIC")
+  ) +
+  scale_shape_manual(
+    values = c("A" = 16, "B" = 17, "C" = 15, "D" = 3),
+    name   = "Biological replicate"
+  ) +
+  theme_classic() +
+  labs(
+    title    = "Delta-Delta Cq Relative to No PolyIC Control",
+    subtitle = "Dashed line = reference level (No PolyIC Control). Points = individual replicates; diamonds = mean ± SE.",
+    x        = "Stress Treatment",
+    y        = "Delta-Delta Cq",
+    color    = "PolyIC Treatment"
+  ) +
+  theme(
+    legend.position = "right",
+    strip.text      = element_text(face = "bold")
+  )
+```
+
+### Fold Change: Individual Replicates (log2 scale)
+
+Fold change relative to No_PolyIC_Control, plotted on a log2 scale so up- and down-regulation appear symmetrical. A log2 fold change of 1 = 2-fold upregulation; -1 = 2-fold downregulation. Points are individual biological replicates; diamonds show group mean ± SE.
+
+```{r plot-foldchange-individual}
+#| hold: true
+#| label: plot-foldchange-individual
+#| fig.width: 12
+#| fig.height: 7
+# Use the significant-gene set derived programmatically in the "Create ANOVA Models"
+# section above (genes with >=1 significant term in the ANOVA that INCLUDES the
+# Mechanical group), rather than a hand-picked list -- the composition and count of
+# significant genes changes whenever the normalizing gene changes. Note these plots
+# show only Control and Temperature; see the section intro text.
+genes_plot <- c("HSP70", "HSP90", "GAPDH", "VIPERIN", "DNMT1")
+
+# Build lettered panel labels dynamically (A, B, C, ...) so this scales to however
+# many genes are in `genes_plot`, instead of hand-enumerating three gene names.
+panel_levels <- genes_plot
+panel_labels <- paste0(LETTERS[seq_along(genes_plot)], ". ", genes_plot)
+
+# Add panel labels to gene names for facet titles
+ddCq_per_sample_labeled <- ddCq_per_sample %>%
+  filter(Target %in% genes_plot) %>%
+  mutate(Target = factor(Target,
+                         levels = panel_levels,
+                         labels = panel_labels))
+
+ddCq_summary_labeled <- ddCq_summary %>%
+  filter(Target %in% genes_plot) %>%
+  mutate(Target = factor(Target,
+                         levels = panel_levels,
+                         labels = panel_labels))
+
+sig_annotations <- ddCq_per_sample %>%
+  filter(Target %in% genes_plot) %>%
+  group_by(Target, stress_type) %>%
+  summarise(y_max = max(log2_fold_change, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Target) %>%
+  mutate(
+    gene_range = max(y_max) - min(y_max),
+    y_pos      = y_max + gene_range * 0.12 + 0.15
+  ) %>%
+  ungroup() %>%
+  mutate(Target = factor(Target,
+                         levels = panel_levels,
+                         labels = panel_labels))
+
+plot_fc <- ggplot() +
+  geom_point(
+    data     = ddCq_per_sample_labeled,
+    aes(x    = stress_type,
+        y    = log2_fold_change,
+        color = polyIC),
+    position = position_jitterdodge(jitter.width = 0.12,
+                                    dodge.width  = dodge_width),
+    size  = 2.2,
+    alpha = 0.2
+  ) +
+  geom_errorbar(
+    data     = ddCq_summary_labeled,
+    aes(x    = stress_type,
+        ymin = mean_log2fc - se_log2fc,
+        ymax = mean_log2fc + se_log2fc,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    width    = 0.18,
+    linewidth = 0.8
+  ) +
+  geom_point(
+    data     = ddCq_summary_labeled,
+    aes(x    = stress_type,
+        y    = mean_log2fc,
+        color = polyIC),
+    position = position_dodge(dodge_width),
+    shape    = 18,
+    size     = 4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.8) +
+  #geom_text(
+  #  data  = sig_annotations,
+  #  aes(x = stress_type, y = y_pos),
+  #  label = "*",
+  #  size  = 6,
+  #  color = "black"
+  #) +
+  facet_wrap(~Target, scales = "free_y", nrow = 1) +
+  scale_color_manual(
+    values = c("No_PolyIC" = "turquoise", "PolyIC" = "salmon"),
+    labels = c("No_PolyIC" = "PolyIC Control", "PolyIC" = "PolyIC Treated")
+  ) +
+  scale_x_discrete(
+    labels = c("Control" = "Control 10°C", "Temperature" = "High 44°C")
+  ) +
+  theme_classic() +
+  labs(
+    x     = "Acute Stress Treatment",
+    y     = "Log2 Fold Change",
+    color = "Poly(I:C) Treatment"
+  ) +
+  theme(
+    legend.position = "bottom",
+    strip.text      = element_text(face = "bold")
+  ); plot_fc
+
+# Save to output_dir/figures/ (created in the setup chunk) rather than a separate
+# top-level figures/qPCR/ path, so the path stays relative to output_dir.
+#
+# Scale the saved figure's width with the number of panels (one per significant gene,
+# nrow = 1 above) rather than a fixed width -- a fixed width made sense when this was
+# hand-enumerated for three genes, but with `genes_plot` now sized programmatically,
+# a fixed width means each panel gets narrower as more genes turn out significant,
+# eventually crowding/wrapping the two-line x-axis labels and truncating facet titles.
+fc_plot_width <- max(8, 2.3 * length(genes_plot))
+ggsave(
+  plot_fc,
+  filename = file.path(output_dir, "figures", "fc_genes.pdf"),
+  width = fc_plot_width, height = 4.5
+)
+```
+
+### Fold Change Summary Table
+
+```{r foldchange-summary-table}
+#| hold: true
+#| results: hold
+#| label: foldchange-summary-table
+
+ddCq_summary %>%
+  filter(Target %in% genes_plot)%>%
+  mutate(
+    mean_FC   = round(2^mean_log2fc, 3),
+    se_FC     = round(se_log2fc * log(2) * 2^mean_log2fc, 3),  # delta method SE on FC scale
+    mean_log2fc = round(mean_log2fc, 3),
+    se_log2fc   = round(se_log2fc,   3)
+  ) %>%
+  dplyr::select(Target, polyIC, stress_type, n,
+                mean_log2fc, se_log2fc,
+                mean_FC, se_FC) %>%
+  arrange(Target, stress_type, polyIC) %>%
+  knitr::kable(
+    col.names = c("Gene", "PolyIC", "Stress", "n",
+                  "Mean log2 FC", "SE log2 FC",
+                  "Mean FC", "SE FC"),
+    caption   = "Fold change relative to No_PolyIC_Control group mean. FC = 2^(log2 FC)."
+  )
+```
+
+## Effect Sizes (Cohen's d)
+
+```{r}
+# Cohen's d effect sizes for polyIC effect per gene and stress type
+effect_sizes <- data %>%
+  filter(Target %in% genes_plot) %>%
+  group_by(Target, stress_type) %>%
+  summarise(
+    mean_polyIC   = mean(delta_Cq[polyIC == "PolyIC"],    na.rm = TRUE),
+    mean_noPolyIC = mean(delta_Cq[polyIC == "No_PolyIC"], na.rm = TRUE),
+    sd_polyIC     = sd(delta_Cq[polyIC == "PolyIC"],      na.rm = TRUE),
+    sd_noPolyIC   = sd(delta_Cq[polyIC == "No_PolyIC"],   na.rm = TRUE),
+    n_polyIC      = sum(!is.na(delta_Cq[polyIC == "PolyIC"])),
+    n_noPolyIC    = sum(!is.na(delta_Cq[polyIC == "No_PolyIC"])),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pooled_sd = sqrt(
+      ((n_polyIC - 1) * sd_polyIC^2 + (n_noPolyIC - 1) * sd_noPolyIC^2) /
+      (n_polyIC + n_noPolyIC - 2)
+    ),
+    cohens_d  = (mean_polyIC - mean_noPolyIC) / pooled_sd
+  )
+
+knitr::kable(
+  effect_sizes %>%
+    dplyr::select(Target, stress_type, n_polyIC, n_noPolyIC, cohens_d) %>%
+    mutate(
+      cohens_d    = round(cohens_d, 3),
+      magnitude   = case_when(
+        abs(cohens_d) >= 0.8 ~ "large",
+        abs(cohens_d) >= 0.5 ~ "medium",
+        abs(cohens_d) >= 0.2 ~ "small",
+        TRUE                 ~ "negligible"
+      )
+    ),
+  col.names = c("Gene", "Stress", "n PolyIC", "n No PolyIC", "Cohen's d", "Magnitude"),
+  caption   = "Cohen's d effect sizes for Poly(I:C) effect on ΔCq. Positive d = higher ΔCq (lower expression) in PolyIC group."
+)
+```
+
