@@ -2814,8 +2814,6 @@ Run ANOVA analyses and check assumptions
 Plot raw data 
 
 ```{r}
-
-
 data%>%
   filter(Target=="ATP.Synthase")%>%
   
@@ -2969,7 +2967,7 @@ model<-data%>%
 
 summary(model)
 
-emm<-emmeans(model, ~ polyIC)
+emm<-emmeans(model, ~ polyIC | stress_type)
 pairs(emm)
 
 qqPlot(model$residuals)
