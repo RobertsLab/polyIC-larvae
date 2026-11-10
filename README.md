@@ -39,7 +39,7 @@ We performed the following measurements:
 - Oyster growth using size images during rearing 
 - Metabolism measured via a resazurin assay (see [Huffmyer et al. 2026](https://peerj.com/articles/21542/#) for the method)
 - Survival under a range of temperatures in laboratory assays 
-- qPCR gene expression under and acute stress experiment 
+-  gene expression under and acute stress experiment 
 
 See the manuscript for details on responses measured and statistical methods.  
 
@@ -55,7 +55,7 @@ polyIC-larvae/
 │   │   ├── baywater/
 │   │   ├── point_whitney/
 │   │   └── sequim/
-│   ├── qPCR/                 # qPCR Cq values, CFX instrument files, and reports
+│   ├── /                 #  Cq values, CFX instrument files, and reports
 │   ├── resazurin/            # Resazurin metabolic assay plate files and metadata
 │   ├── rna-dna/              # RNA/DNA extraction records and sample metadata
 │   └── survival/             # Acute thermal survival assay data
@@ -63,11 +63,11 @@ polyIC-larvae/
 │   ├── environmental/
 │   ├── growth/
 │   ├── outplant/
-│   ├── qPCR/
+│   ├── /
 │   ├── resazurin/
 │   └── survival/
 ├── output/                   # Derived data files and rendered analysis outputs
-│   ├── qPCR/
+│   ├── /
 │   └── resazurin/
 ├── protocols/                # Lab protocols
 │   └── RNA-Extraction-Methods.docx
@@ -81,8 +81,8 @@ polyIC-larvae/
 │   │   ├── growth_SequimBay.Rmd
 │   │   ├── oyster_measurement_analysis.py
 │   │   └── requirements.txt
-│   ├── qPCR/
-│   │   └── 01.00-polyIC-qPCR-analysis.Rmd
+│   ├── /
+│   │   └── 01.00-polyIC--analysis.Rmd
 │   ├── resazurin/
 │   │   ├── resazurin-analysis-batch2.Rmd
 │   │   └── resazurin-testing.Rmd
@@ -139,7 +139,7 @@ Exploratory and method-development script for the resazurin assay pipeline. Used
 
 ---
 
-### qPCR Gene Expression
+###  Gene Expression
 
 **`scripts/qPCR/01.00-polyIC-qPCR-analysis.Rmd`**  
 Analyzes qPCR data from `data/qPCR/` to examine gene expression differences between control and treated families. Reads Cq values, calculates delta-delta-Ct fold changes, and tests for differential expression. Saves figures to `figures/qPCR/` and processed outputs to `output/qPCR/`.
@@ -181,6 +181,16 @@ Python script that uses computer vision (OpenCV) to automatically detect and mea
 - Growth images (`.jpeg`) in `data/growth/` are organized by date and tank. Measurements derived from these images are compiled in `data/growth/growth.csv`.
 - Resazurin plate files are `.txt` exports from the FLx800 plate reader instrument.
 - RNA/DNA extraction records and sample metadata are in `data/rna-dna/` and are used as inputs to the qPCR analysis.
+- qPCR primers:
+
+| TARGET  | FORWARD SEQUENCE        | REVERSE SEQUENCE        | GENE ACCESSION NCBI | NOTES                     |
+|---------|-------------------------|-------------------------|---------------------|---------------------------|
+| DNMT1   | ATTGAGGTCCGTCTCTCCGA    | CTCACACGCCTTACCCTCAG    | 105330054           |                           |
+| cGAS    | TTCAAAGATGGTGCAGGAGGAG  | AGGGTCTTTCACAAGGTTCCTC  |                     | From Laftont et al. 2020  |
+| GAPDH   | GCGTCAGCTGAGGGGGCAGA    | GCGAACGGGATCCAGCCAACA   | AJ544886.1          |                           |
+| HSP70   | AGATTGACGTGGAGTTTGAC    | CCTTACTCAGACGACCTTTG    | AB122063            |                           |
+| HSP90   | GTTACGATACAGCAAGGAGATG  | GGTGAATGTTACCAAGGAAGG   | CB617443            |                           |
+| viperin | TAAATGCGGCTTCTGTTTCC    | CAGCTGAAGGTCCTCTTTGC    |                     | From Laftont et al. 2020  |
 
 ---
 
