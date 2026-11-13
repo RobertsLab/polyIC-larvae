@@ -49,7 +49,7 @@ unique(levels(as.factor(growth$date)))
 growth<-growth%>%
   mutate(age_days=if_else(date=="20241204", 59, 
                           if_else(date=="20250107", 93, 
-                                  if_else(date=="20250206", 123, 
+                                  if_else(date=="20250206", 142, 
                                           if_else(date=="20250530", 236, NA)))))
 
 unique(levels(as.factor(growth$age_days)))
@@ -171,9 +171,22 @@ plot(model, which = 3)   # Scale-Location plot
 #assumptions met 
 rand(model)
 
-model<-lmer(log10(length.mm) ~ treatment * as.factor(age_days)+(1|tank), data=growth)
-emm<-emmeans(model, ~treatment|as.factor(age_days))
-pairs(emm)
+model<-lmer(log10(length.mm) ~ treatment * age_days+(1|tank), data=growth)
+emm_slopes <- emtrends(model, ~treatment, var = "age_days")
+emm_slopes
+pairs(emm_slopes)
+
+#calculate actual slopes
+
+# control
+10^0.00247
+# treated
+10^0.00287
+
+#calculate percent difference in slopes 
+10^0.00287/10^0.00247
+
+#0.0921% difference in slopes (faster in treated)
 ```
 
 
