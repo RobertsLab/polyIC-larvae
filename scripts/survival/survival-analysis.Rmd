@@ -36,6 +36,7 @@ library(lme4)
 library(lmerTest)
 library(car)
 library(effects)
+library(ggeffects)
 library(emmeans)
 ```
 
@@ -162,9 +163,46 @@ testDispersion(sim)
 
 # test zero inflation
 testZeroInflation(sim)
+
+levels(as.factor(surv$temperature))
 ```
 
-Significant effect of temperature and treatment on 14 h survival. 
+Diagnose model separation and convergence issues. 
+```{r}
+surv %>%
+  filter(hours == "24") %>%
+  group_by(temperature, treatment) %>%
+  summarise(n = n(), deaths = sum(mortality), prop = mean(mortality))
+```
+There are some groups with 0 deaths causing problems in the model.  
+
+Remove the near-zero random effect term of treatment:tank.
+```{r}
+# Remove the near-zero treatment:tank term
+surv_model <- surv %>%
+  filter(hours == "24") %>%
+  glmer(mortality ~ temperature * treatment + (1|tank) + (1|batch),
+        family = binomial, data = .)
+```
+
+Address separation and zeros with a new model removing temperatures with 0 death observations. 
+```{r}
+library(blme)
+
+surv_model <- surv %>%
+  filter(hours == "24") %>%
+  filter(!temperature %in% c("16C", "20C", "21C", "36C")) %>%
+ 
+  glmer(mortality ~ temperature * treatment + (1|tank) + (1|batch), family = binomial(link = "logit"), data=.)
+
+summary(surv_model)
+Anova(surv_model, type="II")
+
+emm <- emmeans(surv_model, ~ treatment | temperature)
+pairs(emm)
+```
+
+Significant effect of temperature and treatment on 24 h survival. 
 
 Run posthoc test 
 
@@ -184,11 +222,22 @@ emm_temp <- emmeans(surv_model, ~ temperature | treatment, type = "response")
 pairs(emm_temp)
 ```
 
-Mortality significantly higher in treated at 42C. Mortality significantly higher in control at 40C. Slight but not significant higher mortality in control at 45C.  
+Summarize values. 
+```{r}
+surv %>%
+  filter(hours == "24") %>%
+  group_by(temperature, treatment) %>%
+  summarise(
+    n = n(),
+    mean_mortality = mean(mortality),
+    se_mortality = sd(mortality) / sqrt(n)
+  )
+```
+
 
 ```{r}
 # Generate predictions across temperature and treatment from our model
-preds <- ggpredict(surv_model, terms = c("temperature [all]", "treatment"), type = "fixed")
+preds <- ggeffects::ggpredict(surv_model, terms = c("temperature [all]", "treatment"), type = "fixed")
 
 # Inspect predictions
 head(preds)
@@ -196,7 +245,7 @@ head(preds)
 # Plot model-based predictions + confidence intervals
 plot4 <- ggplot() +
   # Raw mortality points, jittered for visibility
-  geom_point(data = surv %>% filter(hours=="24"),
+  geom_point(data = surv %>% filter(hours=="24") %>% filter(temperature %in% c("38C", "40C", "42C", "45C")),
              aes(x = temperature, y = mortality, color = treatment),
              position = position_jitter(width = 0.3, height = 0.03),
              alpha = 0.6, size = 2) +
@@ -210,14 +259,26 @@ plot4 <- ggplot() +
   # Labels and theme
   labs(y = "Model Predicted Mortality", x = "Temperature") +
   # Manual significance text
-  geom_text(aes(x=6, y=0.65, label="*"), size=12, inherit.aes = FALSE) +
-  geom_text(aes(x=7, y=0.8, label="*"), size=12, inherit.aes = FALSE) +
+  geom_text(aes(x=2, y=0.92, label="*"), size=12, inherit.aes = FALSE) +
+  geom_text(aes(x=3, y=0.92, label="*"), size=12, inherit.aes = FALSE) +
+  geom_text(aes(x=4, y=0.92, label="*"), size=12, inherit.aes = FALSE) +
   theme_classic(base_size = 16); plot4
 
 ggsave(plot4, filename="figures/survival/mortality_temperature_24h.png", width=8, height=5)
 ```
 
+Calculate percent difference. 
 
+```{r}
+surv %>%
+  filter(hours == "24") %>%
+  group_by(temperature, treatment) %>%
+  summarise(mean_mortality = mean(mortality)) %>%
+  pivot_wider(names_from = treatment, values_from = mean_mortality) %>%
+  mutate(
+    percent_difference = ((treated - control) / control) * 100
+  )
+```
 
 
 
